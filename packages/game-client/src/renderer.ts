@@ -3,7 +3,6 @@ import { MapManager } from "@/managers/map";
 import { GameState, getEntityById } from "@/state";
 import { MerchantBuyPanel } from "@/ui/merchant-buy-panel";
 import { Hud } from "@/ui/hud";
-import { GameOverDialogUI } from "@/ui/game-over-dialog";
 import { QuestCompletedModal } from "@/ui/quest-completed-modal";
 import { ParticleManager } from "./managers/particles";
 import { PlacementManager } from "./managers/placement";
@@ -29,7 +28,6 @@ export class Renderer {
   private mapManager: MapManager;
   private hud: Hud;
   private merchantBuyPanel: MerchantBuyPanel;
-  private gameOverDialog: GameOverDialogUI;
   private questCompletedModal: QuestCompletedModal;
   private particleManager: ParticleManager;
   private getPlacementManager: () => PlacementManager | null;
@@ -42,7 +40,6 @@ export class Renderer {
     mapManager: MapManager,
     hud: Hud,
     merchantBuyPanel: MerchantBuyPanel,
-    gameOverDialog: GameOverDialogUI,
     questCompletedModal: QuestCompletedModal,
     particleManager: ParticleManager,
     getPlacementManager: () => PlacementManager | null,
@@ -52,7 +49,6 @@ export class Renderer {
     this.mapManager = mapManager;
     this.hud = hud;
     this.merchantBuyPanel = merchantBuyPanel;
-    this.gameOverDialog = gameOverDialog;
     this.questCompletedModal = questCompletedModal;
     this.particleManager = particleManager;
     this.getPlacementManager = getPlacementManager;
@@ -278,7 +274,6 @@ export class Renderer {
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.hud.render(this.ctx, this.gameState);
     this.merchantBuyPanel.render(this.ctx, this.gameState);
-    this.gameOverDialog.render(this.ctx, this.gameState);
 
     // Render cursor (crosshair when weapon is equipped)
     this.renderCursor();

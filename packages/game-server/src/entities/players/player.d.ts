@@ -2,6 +2,7 @@ import { IGameManagers } from "@/managers/types";
 import { Entity } from "@/entities/entity";
 import { Input } from "@shared/util/input";
 import { InventoryItem, ItemType } from "@shared/util/inventory";
+import { type PlayerInventoryPersistedPayload } from "@shared/util/persisted-inventory-payload";
 import { RecipeType } from "@shared/util/recipes";
 import Vector2 from "@/util/vector2";
 import { Rectangle } from "@/util/shape";
@@ -124,6 +125,8 @@ export declare class Player extends Entity {
     applyPersistedProgress(skillAllocations: Record<string, number>, characterAllocations: Record<string, number>): void;
     /** Called when connecting with persisted website data (keeps fields encapsulated). */
     hydratePersistedProgress(progress: PersistedPlayerProgress): void;
+    /** Full inventory snapshot for website persistence (bag, armor, weapon bar / loadouts). */
+    getSavedInventoryPayload(): PlayerInventoryPersistedPayload;
     /**
      * Open world: consume one-time spawn tile from persisted progress (null if none or already consumed).
      */
