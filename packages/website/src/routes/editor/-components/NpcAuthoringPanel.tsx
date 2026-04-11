@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Accordion,
   AccordionContent,
@@ -23,6 +23,7 @@ import {
   type DialogueNpcCondition,
   type WorldMapDialogueNpcSession,
 } from "@survive-the-night/game-shared/map/world-map-types";
+import { getMapSideLength, parseMapCellAddress } from "../-utils";
 
 function questSummaryLabel(questId: string | undefined, quests: WorldMapQuestDefinition[]): string {
   const id = questId?.trim() ?? "";
@@ -87,11 +88,17 @@ export function NpcAuthoringPanel({
   variant?: "default" | "modal";
 }) {
   const dialogueNpcs = useEditorStore((state) => state.dialogueNpcs);
+  const groundGrid = useEditorStore((state) => state.groundGrid);
   const quests = useEditorStore((state) => state.quests);
   const updateDialogueNpcEntry = useEditorStore((state) => state.updateDialogueNpcEntry);
   const removeDialogueNpcAt = useEditorStore((state) => state.removeDialogueNpcAt);
   const setSelectedSpawnCell = useEditorStore((state) => state.setSelectedSpawnCell);
   const startDialogueNpcRelocate = useEditorStore((state) => state.startDialogueNpcRelocate);
+  const moveDialogueNpcToCell = useEditorStore((state) => state.moveDialogueNpcToCell);
+  const focusCameraOnMapCell = useEditorStore((state) => state.focusCameraOnMapCell);
+  const [targetRow, setTargetRow] = useState(String(row));
+  const [targetCol, setTargetCol] = useState(String(col));
+  const [coordinateError, setCoordinateError] = useState<string | null>(null);
   const sortedItemIds = useMemo(() => {
     const seen = new Set<string>();
     const ids: string[] = [];
@@ -108,6 +115,7 @@ export function NpcAuthoringPanel({
   }, []);
 
   const entry = dialogueNpcs.find((e) => e.row === row && e.col === col);
+  const mapSize = getMapSideLength(groundGrid);
   if (!entry) {
     return (
       <p className="text-[10px] text-gray-500">
@@ -141,6 +149,12 @@ export function NpcAuthoringPanel({
     }
     if (next) updateDialogueNpcEntry(row, col, { dialogueSessions: next });
   }, [dialogueNpcs, row, col, quests, sortedItemIds, updateDialogueNpcEntry]);
+
+  useEffect(() => {
+    setTargetRow(String(row));
+    setTargetCol(String(col));
+    setCoordinateError(null);
+  }, [row, col]);
 
   const patchSessions = (next: WorldMapDialogueNpcSession[]) => {
     updateDialogueNpcEntry(row, col, { dialogueSessions: next });
@@ -228,6 +242,33 @@ export function NpcAuthoringPanel({
     patchSessions(sessions.filter((_, i) => i !== idx));
   };
 
+  const parseTargetCell = () => parseMapCellAddress(targetRow, targetCol, mapSize);
+
+  const handleGoToTarget = () => {
+    const parsed = parseTargetCell();
+    if ("error" in parsed) {
+      setCoordinateError(parsed.error);
+      return;
+    }
+    focusCameraOnMapCell(parsed.row, parsed.col);
+    setCoordinateError(null);
+  };
+
+  const handleMoveToTarget = () => {
+    const parsed = parseTargetCell();
+    if ("error" in parsed) {
+      setCoordinateError(parsed.error);
+      return;
+    }
+    const moved = moveDialogueNpcToCell(row, col, parsed.row, parsed.col);
+    if (!moved) {
+      setCoordinateError("Destination tile must be empty.");
+      return;
+    }
+    focusCameraOnMapCell(parsed.row, parsed.col);
+    setCoordinateError(null);
+  };
+
   return (
     <div className="space-y-2 rounded border border-emerald-700/80 bg-gray-900/90 p-2">
       <div className="flex items-center justify-between gap-2">
@@ -269,6 +310,52 @@ export function NpcAuthoringPanel({
       <p className="text-[9px] text-gray-500">
         row {row}, col {col}
       </p>
+      <div className="space-y-1 rounded border border-emerald-800/60 bg-gray-950/70 p-2">
+        <p className="text-[10px] font-medium text-emerald-200">Move to tile coordinates</p>
+        <div className="grid grid-cols-2 gap-1">
+          <input
+            type="number"
+            min={0}
+            max={Math.max(0, mapSize - 1)}
+            className="w-full rounded border border-gray-600 bg-gray-950 px-2 py-1 text-[11px] text-gray-100"
+            value={targetRow}
+            onChange={(e) => setTargetRow(e.target.value)}
+            placeholder="row"
+          />
+          <input
+            type="number"
+            min={0}
+            max={Math.max(0, mapSize - 1)}
+            className="w-full rounded border border-gray-600 bg-gray-950 px-2 py-1 text-[11px] text-gray-100"
+            value={targetCol}
+            onChange={(e) => setTargetCol(e.target.value)}
+            placeholder="col"
+          />
+        </div>
+        <div className="flex flex-wrap gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="!h-6 !min-h-0 !px-2 !py-0 !text-[10px]"
+            onClick={handleGoToTarget}
+          >
+            Go
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="!h-6 !min-h-0 !px-2 !py-0 !text-[10px]"
+            onClick={handleMoveToTarget}
+          >
+            Move to coords
+          </Button>
+        </div>
+        <p className={`text-[9px] ${coordinateError ? "text-amber-300" : "text-gray-500"}`}>
+          {coordinateError ?? `Map bounds: 0-${Math.max(0, mapSize - 1)}.`}
+        </p>
+      </div>
       <p className="text-[9px] leading-snug text-gray-500">
         First matching condition wins. Put <span className="text-gray-300">Always</span> last as the
         fallback branch.

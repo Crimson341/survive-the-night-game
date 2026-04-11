@@ -1,14 +1,16 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "~/components/ui/button";
 import { useEditorStore } from "../-store";
 import type { WorldMapDialogueNpcEntry } from "@survive-the-night/game-shared/map/world-map-types";
 import { getDialogueNpcLines } from "@survive-the-night/game-shared/map/world-map-types";
-import { getMapSideLength, isMapCellInEditorCameraView } from "../-utils";
+import { isNpcDialogueSpawnTile } from "@survive-the-night/game-shared/map/spawn-palette";
+import { getMapSideLength, isMapCellInEditorCameraView, parseMapCellAddress } from "../-utils";
 
 const sectionLabel = "text-[10px] font-medium uppercase tracking-wide text-gray-500";
 
 export function NpcsListPanel() {
   const dialogueNpcs = useEditorStore((state) => state.dialogueNpcs);
+  const spawnsGrid = useEditorStore((state) => state.spawnsGrid);
   const groundGrid = useEditorStore((state) => state.groundGrid);
   const cameraX = useEditorStore((state) => state.cameraX);
   const cameraY = useEditorStore((state) => state.cameraY);
@@ -17,6 +19,11 @@ export function NpcsListPanel() {
   const removeDialogueNpcAt = useEditorStore((state) => state.removeDialogueNpcAt);
   const openDialogueNpcEditor = useEditorStore((state) => state.openDialogueNpcEditor);
   const focusCameraOnMapCell = useEditorStore((state) => state.focusCameraOnMapCell);
+  const addDialogueNpcAtTile = useEditorStore((state) => state.addDialogueNpcAtTile);
+  const [targetRow, setTargetRow] = useState("");
+  const [targetCol, setTargetCol] = useState("");
+  const [coordinateError, setCoordinateError] = useState<string | null>(null);
+  const mapSize = getMapSideLength(groundGrid);
 
   const sorted = useMemo(
     () => [...dialogueNpcs].sort((a, b) => a.row - b.row || a.col - b.col),
@@ -24,7 +31,6 @@ export function NpcsListPanel() {
   );
 
   const { inView, rest } = useMemo(() => {
-    const mapSize = getMapSideLength(groundGrid);
     const vp = { cameraX, cameraY, viewportWidthTiles, viewportHeightTiles, mapSize };
     const a: WorldMapDialogueNpcEntry[] = [];
     const b: WorldMapDialogueNpcEntry[] = [];
@@ -35,12 +41,92 @@ export function NpcsListPanel() {
     return { inView: a, rest: b };
   }, [sorted, groundGrid, cameraX, cameraY, viewportWidthTiles, viewportHeightTiles]);
 
+  const parseTargetCell = () => parseMapCellAddress(targetRow, targetCol, mapSize);
+
+  const handleGoToTarget = () => {
+    const parsed = parseTargetCell();
+    if ("error" in parsed) {
+      setCoordinateError(parsed.error);
+      return;
+    }
+    focusCameraOnMapCell(parsed.row, parsed.col);
+    setCoordinateError(null);
+  };
+
+  const handleAddOrOpenAtTarget = () => {
+    const parsed = parseTargetCell();
+    if ("error" in parsed) {
+      setCoordinateError(parsed.error);
+      return;
+    }
+    const tileId = spawnsGrid[parsed.row]?.[parsed.col] ?? 0;
+    if (isNpcDialogueSpawnTile(tileId)) {
+      openDialogueNpcEditor(parsed.row, parsed.col);
+    } else if (tileId > 0) {
+      setCoordinateError("That tile already has a non-NPC spawner.");
+      return;
+    } else {
+      addDialogueNpcAtTile(parsed.row, parsed.col);
+    }
+    focusCameraOnMapCell(parsed.row, parsed.col);
+    setCoordinateError(null);
+  };
+
   if (sorted.length === 0) {
     return (
-      <p className="text-[10px] text-gray-500">
-        No dialogue NPCs yet. Right-click the map and choose{" "}
-        <span className="text-emerald-300">Add NPC</span>.
-      </p>
+      <div className="space-y-2">
+        <div className="space-y-1 rounded border border-emerald-800/60 bg-gray-900/80 p-2">
+          <p className="text-[10px] font-medium text-emerald-200">Open or add by coordinates</p>
+          <div className="grid grid-cols-2 gap-1">
+            <input
+              type="number"
+              min={0}
+              max={Math.max(0, mapSize - 1)}
+              className="w-full rounded border border-gray-600 bg-gray-950 px-2 py-1 text-[11px] text-gray-100"
+              value={targetRow}
+              onChange={(e) => setTargetRow(e.target.value)}
+              placeholder="row"
+            />
+            <input
+              type="number"
+              min={0}
+              max={Math.max(0, mapSize - 1)}
+              className="w-full rounded border border-gray-600 bg-gray-950 px-2 py-1 text-[11px] text-gray-100"
+              value={targetCol}
+              onChange={(e) => setTargetCol(e.target.value)}
+              placeholder="col"
+            />
+          </div>
+          <div className="flex flex-wrap gap-1">
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="!h-6 !min-h-0 !px-2 !py-0 !text-[10px]"
+              onClick={handleGoToTarget}
+            >
+              Go
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="!h-6 !min-h-0 !px-2 !py-0 !text-[10px]"
+              onClick={handleAddOrOpenAtTarget}
+            >
+              Add / Open
+            </Button>
+          </div>
+          <p className={`text-[9px] ${coordinateError ? "text-amber-300" : "text-gray-500"}`}>
+            {coordinateError ?? `Map bounds: 0-${Math.max(0, mapSize - 1)}.`}
+          </p>
+        </div>
+        <p className="text-[10px] text-gray-500">
+          No dialogue NPCs yet. Right-click the map and choose{" "}
+          <span className="text-emerald-300">Add NPC</span>, or add one directly by tile
+          coordinates here.
+        </p>
+      </div>
     );
   }
 
@@ -88,6 +174,52 @@ export function NpcsListPanel() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
+      <div className="space-y-1 rounded border border-emerald-800/60 bg-gray-900/80 p-2">
+        <p className="text-[10px] font-medium text-emerald-200">Open or add by coordinates</p>
+        <div className="grid grid-cols-2 gap-1">
+          <input
+            type="number"
+            min={0}
+            max={Math.max(0, mapSize - 1)}
+            className="w-full rounded border border-gray-600 bg-gray-950 px-2 py-1 text-[11px] text-gray-100"
+            value={targetRow}
+            onChange={(e) => setTargetRow(e.target.value)}
+            placeholder="row"
+          />
+          <input
+            type="number"
+            min={0}
+            max={Math.max(0, mapSize - 1)}
+            className="w-full rounded border border-gray-600 bg-gray-950 px-2 py-1 text-[11px] text-gray-100"
+            value={targetCol}
+            onChange={(e) => setTargetCol(e.target.value)}
+            placeholder="col"
+          />
+        </div>
+        <div className="flex flex-wrap gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="!h-6 !min-h-0 !px-2 !py-0 !text-[10px]"
+            onClick={handleGoToTarget}
+          >
+            Go
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="!h-6 !min-h-0 !px-2 !py-0 !text-[10px]"
+            onClick={handleAddOrOpenAtTarget}
+          >
+            Add / Open
+          </Button>
+        </div>
+        <p className={`text-[9px] ${coordinateError ? "text-amber-300" : "text-gray-500"}`}>
+          {coordinateError ?? `Map bounds: 0-${Math.max(0, mapSize - 1)}.`}
+        </p>
+      </div>
       <p className="text-[10px] text-gray-500">
         {sorted.length} NPC{sorted.length === 1 ? "" : "s"} ({inView.length} in view) — click a row
         to edit. <span className="text-gray-400">Go</span> moves the camera.

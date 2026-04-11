@@ -29,6 +29,7 @@ import { ClientInventory } from "@/extensions/inventory";
 import { renderRadialProgressIndicator } from "@/util/radial-progress-indicator";
 import { getMinimapHudLayout } from "./minimap-hud-group-layout";
 import { QuestJournalPanel } from "./quest-journal-panel";
+import { DialoguePanel } from "./dialogue-panel";
 
 const HUD_SETTINGS = {
   GameMessages: {
@@ -91,6 +92,17 @@ const HUD_SETTINGS = {
   },
 };
 
+function formatPlayerTileCoordinates(player: PlayerClient | null): string {
+  if (!player) {
+    return "Tile row -, col -";
+  }
+  const center = player.getCenterPosition();
+  const tileSize = getConfig().world.TILE_SIZE;
+  const row = Math.floor(center.y / tileSize);
+  const col = Math.floor(center.x / tileSize);
+  return `Tile row ${row}, col ${col}`;
+}
+
 export class Hud {
   private showInstructions: boolean = false;
   private mapManager: MapManager;
@@ -104,6 +116,7 @@ export class Hud {
   private versionPanel: TextPanel;
   private fpsPanel: TextPanel;
   private pingPanel: TextPanel;
+  private coordinatesPanel: TextPanel;
   private deathScreenPanel: DeathScreenPanel;
   private gameMessagesPanel: GameMessagesPanel;
   private muteButtonPanel: MuteButtonPanel;
@@ -122,6 +135,7 @@ export class Hud {
   private mouseY: number = 0;
   private canvasHeight: number = 0;
   private questJournalPanel: QuestJournalPanel;
+  private dialoguePanel: DialoguePanel;
 
   constructor(
     mapManager: MapManager,
@@ -148,6 +162,7 @@ export class Hud {
     this.getMyPlayer = getMyPlayer;
     this.chatWidget = new ChatWidget();
     this.questJournalPanel = new QuestJournalPanel();
+    this.dialoguePanel = new DialoguePanel(this.assetManager);
 
     // Create getInventory function for HUD that uses currentGameState
     const getInventory = (): (InventoryItem | null)[] => {
@@ -247,6 +262,18 @@ export class Hud {
       text: "0ms",
       font: HUD_SETTINGS.BottomRightPanels.font,
       textColor: HUD_SETTINGS.BottomRightPanels.pingColors.excellent,
+    });
+
+    this.coordinatesPanel = new TextPanel({
+      padding: HUD_SETTINGS.BottomRightPanels.padding,
+      background: HUD_SETTINGS.BottomRightPanels.background,
+      borderColor: HUD_SETTINGS.BottomRightPanels.borderColor,
+      borderWidth: HUD_SETTINGS.BottomRightPanels.borderWidth,
+      x: 0,
+      y: 0,
+      text: "Tile row -, col -",
+      font: HUD_SETTINGS.BottomRightPanels.font,
+      textColor: "rgba(120, 255, 255, 0.95)",
     });
 
     // Initialize death screen panel
@@ -374,6 +401,14 @@ export class Hud {
     this.fpsPanel.setText(`${fps} FPS`);
   }
 
+  public isDialogueLineFullyRevealed(gameState: GameState): boolean {
+    return this.dialoguePanel.isCurrentLineFullyRevealed(gameState);
+  }
+
+  public completeDialogueLine(gameState: GameState): boolean {
+    return this.dialoguePanel.completeCurrentLine(gameState);
+  }
+
   public render(ctx: CanvasRenderingContext2D, gameState: GameState): void {
     this.currentGameState = gameState;
     const { width, height } = ctx.canvas;
@@ -398,13 +433,22 @@ export class Hud {
 
     const player = getPlayer(gameState);
     const ping = player ? player.getPing() : 0;
+    this.coordinatesPanel.setText(formatPlayerTileCoordinates(player));
     this.pingPanel.setText(`${Math.round(ping)}ms`);
     (this.pingPanel as any).textSettings.textColor = this.getPingColor(ping);
 
+    const coordsW = this.coordinatesPanel.getWidth(ctx);
+    const coordsH = this.coordinatesPanel.getHeight();
     const fpsW = this.fpsPanel.getWidth(ctx);
     const pingW = this.pingPanel.getWidth(ctx);
     const versionW = this.versionPanel.getWidth(ctx);
     const rowY = height - marginBottom - this.fpsPanel.getHeight();
+    const coordsX = width - marginRight - coordsW;
+    const coordsY = rowY - gap - coordsH;
+
+    (this.coordinatesPanel as any).textSettings.x = coordsX;
+    (this.coordinatesPanel as any).textSettings.y = coordsY;
+    this.coordinatesPanel.render(ctx, gameState);
 
     let x = width - marginRight - fpsW;
     (this.fpsPanel as any).textSettings.x = x;
@@ -423,16 +467,25 @@ export class Hud {
 
     ctx.restore();
 
-    this.loadoutStrip.render(ctx, gameState);
+    const dialogueOcclusion = this.dialoguePanel.getOcclusionProgress();
+    if (dialogueOcclusion < 0.98) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, 1 - dialogueOcclusion * 1.2);
+      this.loadoutStrip.render(ctx, gameState);
+      ctx.restore();
+    }
 
     // Render transient HUD messages (loot, craft, etc.)
     this.gameMessagesPanel.render(ctx, gameState);
 
     // Level + XP (centered above hotbar)
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    this.experiencePanel.render(ctx, gameState);
-    ctx.restore();
+    if (dialogueOcclusion < 0.98) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, 1 - dialogueOcclusion * 1.25);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      this.experiencePanel.render(ctx, gameState);
+      ctx.restore();
+    }
 
     // Render mute button
     ctx.save();
@@ -447,7 +500,7 @@ export class Hud {
     // Health + stamina orbs (left/right of bottom loadout strip)
     const currentPlayer = getPlayer(gameState);
     const isZombiePlayer = currentPlayer?.isZombiePlayer?.() ?? false;
-    if (!isZombiePlayer) {
+    if (!isZombiePlayer && dialogueOcclusion < 0.98) {
       this.survivorStatusHud.renderHealthAndStamina(ctx, gameState, minimapHudLayout);
     }
 
@@ -469,6 +522,8 @@ export class Hud {
       my?.getQuestProgressPayload() ?? null,
     );
     ctx.restore();
+
+    this.dialoguePanel.render(ctx, gameState);
 
     // Render fullscreen map on top of everything else if open
     this.fullscreenMap.render(ctx, gameState);

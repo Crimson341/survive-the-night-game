@@ -17,6 +17,41 @@ export function getMapSideLength(groundGrid: number[][]): number {
   return groundGrid.length > 0 ? groundGrid.length : getFullMapTileCount();
 }
 
+export function isMapCellInBounds(row: number, col: number, mapSize: number): boolean {
+  return (
+    Number.isInteger(row) &&
+    Number.isInteger(col) &&
+    row >= 0 &&
+    col >= 0 &&
+    row < mapSize &&
+    col < mapSize
+  );
+}
+
+export function parseMapCellAddress(
+  rowInput: string,
+  colInput: string,
+  mapSize: number,
+): { row: number; col: number } | { error: string } {
+  const rowText = rowInput.trim();
+  const colText = colInput.trim();
+  if (!rowText || !colText) {
+    return { error: "Enter both row and col." };
+  }
+
+  const row = Number(rowText);
+  const col = Number(colText);
+  if (!Number.isInteger(row) || !Number.isInteger(col)) {
+    return { error: "Coordinates must be whole numbers." };
+  }
+
+  if (!isMapCellInBounds(row, col, mapSize)) {
+    return { error: `Coordinates must be between 0 and ${Math.max(0, mapSize - 1)}.` };
+  }
+
+  return { row, col };
+}
+
 export interface EditorCameraViewport {
   cameraX: number;
   cameraY: number;

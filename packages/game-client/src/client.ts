@@ -256,6 +256,10 @@ export class GameClient {
               openEnt.getExt(ClientPositionable).getCenterPosition(),
             );
             if (d <= maxInteract) {
+              if (!this.hud.isDialogueLineFullyRevealed(this.gameState)) {
+                this.hud.completeDialogueLine(this.gameState);
+                return;
+              }
               this.advanceNpcDialogue();
               return;
             }

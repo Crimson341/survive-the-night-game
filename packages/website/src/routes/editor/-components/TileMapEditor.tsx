@@ -24,6 +24,12 @@ function isTypingTarget(el: EventTarget | null): boolean {
 /** Full-viewport map canvas only — UI lives in overlay panels. */
 export function TileMapEditor() {
   const activeLayer = useEditorStore((state) => state.activeLayer);
+  const groundGrid = useEditorStore((state) => state.groundGrid);
+  const selectedSpawnCell = useEditorStore((state) => state.selectedSpawnCell);
+  const cameraX = useEditorStore((state) => state.cameraX);
+  const cameraY = useEditorStore((state) => state.cameraY);
+  const viewportWidthTiles = useEditorStore((state) => state.viewportWidthTiles);
+  const viewportHeightTiles = useEditorStore((state) => state.viewportHeightTiles);
 
   const handleGridCellClick = useEditorStore((state) => state.handleGridCellClick);
   const saveToHistory = useEditorStore((state) => state.saveToHistory);
@@ -62,6 +68,7 @@ export function TileMapEditor() {
 
   const [shiftHeld, setShiftHeld] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
+  const [hoverTile, setHoverTile] = useState<{ row: number; col: number } | null>(null);
   const [spawnPopover, setSpawnPopover] = useState<{
     clientX: number;
     clientY: number;
@@ -77,6 +84,9 @@ export function TileMapEditor() {
   const tileContextMenuRef = useRef<HTMLDivElement>(null);
 
   const tilePx = editorTilePixelSize;
+  const mapSize = getMapSideLength(groundGrid);
+  const visibleMaxRow = Math.max(cameraY, Math.min(cameraY + viewportHeightTiles, mapSize) - 1);
+  const visibleMaxCol = Math.max(cameraX, Math.min(cameraX + viewportWidthTiles, mapSize) - 1);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -594,6 +604,7 @@ export function TileMapEditor() {
         const prev = hoverCellRef.current;
         if (!prev || prev.row !== t.row || prev.col !== t.col) {
           hoverCellRef.current = { row: t.row, col: t.col };
+          setHoverTile({ row: t.row, col: t.col });
           schedulePaintRef.current();
         }
       }
@@ -605,6 +616,7 @@ export function TileMapEditor() {
     if (t) {
       if (!prev || prev.row !== t.row || prev.col !== t.col) {
         hoverCellRef.current = { row: t.row, col: t.col };
+        setHoverTile({ row: t.row, col: t.col });
         schedulePaintRef.current();
       }
       const st = useEditorStore.getState();
@@ -622,6 +634,7 @@ export function TileMapEditor() {
       }
     } else if (prev) {
       hoverCellRef.current = null;
+      setHoverTile(null);
       schedulePaintRef.current();
       setSpawnPopover(null);
     }
@@ -631,12 +644,14 @@ export function TileMapEditor() {
     if (isPanningRef.current) {
       if (hoverCellRef.current) {
         hoverCellRef.current = null;
+        setHoverTile(null);
         schedulePaintRef.current();
       }
       return;
     }
     if (hoverCellRef.current) {
       hoverCellRef.current = null;
+      setHoverTile(null);
       schedulePaintRef.current();
     }
     setSpawnPopover(null);
@@ -737,6 +752,20 @@ export function TileMapEditor() {
         </div>
       </div>
       {popoverContent}
+      <div className="pointer-events-none fixed bottom-6 left-6 z-[45] rounded border border-cyan-400/40 bg-gray-950/90 px-3 py-2 text-[11px] text-cyan-50 shadow-lg">
+        <p className="font-medium text-cyan-200">Tile Coordinates</p>
+        <p>Hover: {hoverTile ? `row ${hoverTile.row}, col ${hoverTile.col}` : "move cursor over map"}</p>
+        <p>
+          Selected:{" "}
+          {selectedSpawnCell
+            ? `row ${selectedSpawnCell.row}, col ${selectedSpawnCell.col}`
+            : "none"}
+        </p>
+        <p>
+          View: rows {cameraY}-{visibleMaxRow}, cols {cameraX}-{visibleMaxCol}
+        </p>
+        <p className="text-cyan-200/80">Tell me: row X, col Y</p>
+      </div>
       {tileContextMenu ? (
         <div
           ref={tileContextMenuRef}
@@ -744,6 +773,9 @@ export function TileMapEditor() {
           style={{ left: tileContextMenu.clientX, top: tileContextMenu.clientY }}
           role="menu"
         >
+          <div className="border-b border-gray-700 px-3 py-1 text-[10px] text-gray-400">
+            Tile ({tileContextMenu.row}, {tileContextMenu.col})
+          </div>
           <button
             type="button"
             role="menuitem"

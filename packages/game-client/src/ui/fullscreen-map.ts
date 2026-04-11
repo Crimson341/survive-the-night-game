@@ -154,7 +154,17 @@ export class FullScreenMap {
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     const headerY = settings.padding + settings.headerHeight / 2;
-    ctx.fillText("Map (Press M to close)", settings.padding + 20, headerY);
+    const playerTileRow = Math.floor(playerPos.y / this.tileSize);
+    const playerTileCol = Math.floor(playerPos.x / this.tileSize);
+    ctx.fillText("Map (Press M to close)", settings.padding + 20, headerY - 10);
+
+    ctx.font = "16px Arial";
+    ctx.fillStyle = "rgba(180, 255, 255, 0.95)";
+    ctx.fillText(
+      `Tile row ${playerTileRow}, col ${playerTileCol}`,
+      settings.padding + 20,
+      headerY + 14
+    );
 
     // Draw zoom controls in header (right side)
     this.renderZoomControls(ctx, canvasWidth, headerY);

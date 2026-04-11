@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -27,6 +28,7 @@ import {
   isNpcDialogueSpawnTile,
   isPlayerSpawnTile,
 } from "@survive-the-night/game-shared/map/spawn-palette";
+import { getMapSideLength, parseMapCellAddress } from "../-utils";
 
 const SPAWNER_TYPE_SELECT_BASE_ENTRIES = SPAWNER_META_CONFIGURABLE_ENTRIES.filter(
   (e) => !isItemSpawnTile(e.id),
@@ -39,7 +41,9 @@ export function SpawnerMetaModal() {
   const spawnerConfigModal = useEditorStore((s) => s.spawnerConfigModal);
   const setSpawnerConfigModal = useEditorStore((s) => s.setSpawnerConfigModal);
   const startSpawnerRelocate = useEditorStore((s) => s.startSpawnerRelocate);
+  const moveSpawnerToCell = useEditorStore((s) => s.moveSpawnerToCell);
   const spawnsGrid = useEditorStore((s) => s.spawnsGrid);
+  const groundGrid = useEditorStore((s) => s.groundGrid);
   const spawnerMeta = useEditorStore((s) => s.spawnerMeta);
   const updateSpawnerMetaAt = useEditorStore((s) => s.updateSpawnerMetaAt);
   const updateSpawnerRespawnIntervalSecAt = useEditorStore(
@@ -47,16 +51,54 @@ export function SpawnerMetaModal() {
   );
   const setSpawnerSpawnTypeAt = useEditorStore((s) => s.setSpawnerSpawnTypeAt);
   const removeSpawnerAt = useEditorStore((s) => s.removeSpawnerAt);
+  const focusCameraOnMapCell = useEditorStore((s) => s.focusCameraOnMapCell);
 
   const open = spawnerConfigModal !== null;
   const row = spawnerConfigModal?.row ?? 0;
   const col = spawnerConfigModal?.col ?? 0;
+  const mapSize = getMapSideLength(groundGrid);
+  const [targetRow, setTargetRow] = useState(String(row));
+  const [targetCol, setTargetCol] = useState(String(col));
+  const [coordinateError, setCoordinateError] = useState<string | null>(null);
   const tileId = spawnsGrid[row]?.[col] ?? 0;
   const valid =
     open && tileId > 0 && !isNpcDialogueSpawnTile(tileId);
   const entry = spawnerMeta.find((e) => e.row === row && e.col === col);
   const defaultRespawnSec = getAuthoredSpawnerDefaultRespawnSec(tileId);
   const showRespawnInterval = valid && !isPlayerSpawnTile(tileId);
+
+  useEffect(() => {
+    setTargetRow(String(row));
+    setTargetCol(String(col));
+    setCoordinateError(null);
+  }, [row, col, open]);
+
+  const parseTargetCell = () => parseMapCellAddress(targetRow, targetCol, mapSize);
+
+  const handleGoToTarget = () => {
+    const parsed = parseTargetCell();
+    if ("error" in parsed) {
+      setCoordinateError(parsed.error);
+      return;
+    }
+    focusCameraOnMapCell(parsed.row, parsed.col);
+    setCoordinateError(null);
+  };
+
+  const handleMoveToTarget = () => {
+    const parsed = parseTargetCell();
+    if ("error" in parsed) {
+      setCoordinateError(parsed.error);
+      return;
+    }
+    const moved = moveSpawnerToCell(row, col, parsed.row, parsed.col);
+    if (!moved) {
+      setCoordinateError("Destination tile must be empty.");
+      return;
+    }
+    focusCameraOnMapCell(parsed.row, parsed.col);
+    setCoordinateError(null);
+  };
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && setSpawnerConfigModal(null)}>
@@ -94,6 +136,52 @@ export function SpawnerMetaModal() {
               >
                 Remove
               </Button>
+            </div>
+            <div className="space-y-1 rounded border border-violet-800/60 bg-gray-950/70 p-2">
+              <p className="text-[10px] font-medium text-violet-200">Move to tile coordinates</p>
+              <div className="grid grid-cols-2 gap-1">
+                <input
+                  type="number"
+                  min={0}
+                  max={Math.max(0, mapSize - 1)}
+                  className="w-full rounded border border-gray-600 bg-gray-950 px-2 py-1 text-[11px] text-gray-100"
+                  value={targetRow}
+                  onChange={(e) => setTargetRow(e.target.value)}
+                  placeholder="row"
+                />
+                <input
+                  type="number"
+                  min={0}
+                  max={Math.max(0, mapSize - 1)}
+                  className="w-full rounded border border-gray-600 bg-gray-950 px-2 py-1 text-[11px] text-gray-100"
+                  value={targetCol}
+                  onChange={(e) => setTargetCol(e.target.value)}
+                  placeholder="col"
+                />
+              </div>
+              <div className="flex flex-wrap gap-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="!h-6 !min-h-0 !px-2 !py-0 !text-[10px]"
+                  onClick={handleGoToTarget}
+                >
+                  Go
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="!h-6 !min-h-0 !px-2 !py-0 !text-[10px]"
+                  onClick={handleMoveToTarget}
+                >
+                  Move to coords
+                </Button>
+              </div>
+              <p className={`text-[9px] ${coordinateError ? "text-amber-300" : "text-gray-500"}`}>
+                {coordinateError ?? `Map bounds: 0-${Math.max(0, mapSize - 1)}.`}
+              </p>
             </div>
             <label className="block text-[10px] font-medium text-gray-400">Spawner type</label>
             <Select

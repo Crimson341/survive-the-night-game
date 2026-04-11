@@ -1,11 +1,11 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "~/components/ui/button";
 import { useEditorStore } from "../-store";
 import {
-  SPAWN_PALETTE_ENTRIES,
   isNpcDialogueSpawnTile,
+  SPAWN_PALETTE_ENTRIES,
 } from "@survive-the-night/game-shared/map/spawn-palette";
-import { getMapSideLength, isMapCellInEditorCameraView } from "../-utils";
+import { getMapSideLength, isMapCellInEditorCameraView, parseMapCellAddress } from "../-utils";
 
 const sectionLabel = "text-[10px] font-medium uppercase tracking-wide text-gray-500";
 
@@ -23,6 +23,11 @@ export function SpawnersListPanel() {
   const spawnerMeta = useEditorStore((state) => state.spawnerMeta);
   const focusCameraOnMapCell = useEditorStore((state) => state.focusCameraOnMapCell);
   const openSpawnerMetaEditor = useEditorStore((state) => state.openSpawnerMetaEditor);
+  const addItemSpawnerAtTile = useEditorStore((state) => state.addItemSpawnerAtTile);
+  const [targetRow, setTargetRow] = useState("");
+  const [targetCol, setTargetCol] = useState("");
+  const [coordinateError, setCoordinateError] = useState<string | null>(null);
+  const mapSize = getMapSideLength(groundGrid);
 
   const entries = useMemo(() => {
     const out: { row: number; col: number; id: number }[] = [];
@@ -41,7 +46,6 @@ export function SpawnersListPanel() {
   }, [spawnsGrid]);
 
   const { inView, rest } = useMemo(() => {
-    const mapSize = getMapSideLength(groundGrid);
     const vp = { cameraX, cameraY, viewportWidthTiles, viewportHeightTiles, mapSize };
     const a: typeof entries = [];
     const b: typeof entries = [];
@@ -52,15 +56,93 @@ export function SpawnersListPanel() {
     return { inView: a, rest: b };
   }, [entries, groundGrid, cameraX, cameraY, viewportWidthTiles, viewportHeightTiles]);
 
+  const parseTargetCell = () => parseMapCellAddress(targetRow, targetCol, mapSize);
+
+  const handleGoToTarget = () => {
+    const parsed = parseTargetCell();
+    if ("error" in parsed) {
+      setCoordinateError(parsed.error);
+      return;
+    }
+    focusCameraOnMapCell(parsed.row, parsed.col);
+    setCoordinateError(null);
+  };
+
+  const handleAddOrOpenAtTarget = () => {
+    const parsed = parseTargetCell();
+    if ("error" in parsed) {
+      setCoordinateError(parsed.error);
+      return;
+    }
+    const tileId = spawnsGrid[parsed.row]?.[parsed.col] ?? 0;
+    if (tileId > 0 && !isNpcDialogueSpawnTile(tileId)) {
+      openSpawnerMetaEditor(parsed.row, parsed.col);
+    } else if (tileId > 0) {
+      setCoordinateError("That tile already has a dialogue NPC.");
+      return;
+    } else {
+      addItemSpawnerAtTile(parsed.row, parsed.col);
+    }
+    focusCameraOnMapCell(parsed.row, parsed.col);
+    setCoordinateError(null);
+  };
+
   if (entries.length === 0) {
     return (
-      <p className="text-[10px] text-gray-500">
-        No spawners (player, zombies, or item fixtures) on the map. Right-click a tile and choose{" "}
-        <span className="text-violet-300">Add spawner</span> on the map (first item type in the
-        registry). Use <span className="text-gray-300">Go</span> to move the camera,{" "}
-        <span className="text-gray-300">Select</span> to highlight on the map.
-        Dialogue NPCs are under NPCs.
-      </p>
+      <div className="space-y-2">
+        <div className="space-y-1 rounded border border-violet-800/60 bg-gray-900/80 p-2">
+          <p className="text-[10px] font-medium text-violet-200">Open or add by coordinates</p>
+          <div className="grid grid-cols-2 gap-1">
+            <input
+              type="number"
+              min={0}
+              max={Math.max(0, mapSize - 1)}
+              className="w-full rounded border border-gray-600 bg-gray-950 px-2 py-1 text-[11px] text-gray-100"
+              value={targetRow}
+              onChange={(e) => setTargetRow(e.target.value)}
+              placeholder="row"
+            />
+            <input
+              type="number"
+              min={0}
+              max={Math.max(0, mapSize - 1)}
+              className="w-full rounded border border-gray-600 bg-gray-950 px-2 py-1 text-[11px] text-gray-100"
+              value={targetCol}
+              onChange={(e) => setTargetCol(e.target.value)}
+              placeholder="col"
+            />
+          </div>
+          <div className="flex flex-wrap gap-1">
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="!h-6 !min-h-0 !px-2 !py-0 !text-[10px]"
+              onClick={handleGoToTarget}
+            >
+              Go
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="!h-6 !min-h-0 !px-2 !py-0 !text-[10px]"
+              onClick={handleAddOrOpenAtTarget}
+            >
+              Add / Open
+            </Button>
+          </div>
+          <p className={`text-[9px] ${coordinateError ? "text-amber-300" : "text-gray-500"}`}>
+            {coordinateError ?? `Map bounds: 0-${Math.max(0, mapSize - 1)}.`}
+          </p>
+        </div>
+        <p className="text-[10px] text-gray-500">
+          No spawners (player, zombies, or item fixtures) on the map. Right-click a tile and choose{" "}
+          <span className="text-violet-300">Add spawner</span>, or place one here by tile
+          coordinates. New coordinate adds use the default spawner tile, then you can edit the
+          type.
+        </p>
+      </div>
     );
   }
 
@@ -114,6 +196,52 @@ export function SpawnersListPanel() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
+      <div className="space-y-1 rounded border border-violet-800/60 bg-gray-900/80 p-2">
+        <p className="text-[10px] font-medium text-violet-200">Open or add by coordinates</p>
+        <div className="grid grid-cols-2 gap-1">
+          <input
+            type="number"
+            min={0}
+            max={Math.max(0, mapSize - 1)}
+            className="w-full rounded border border-gray-600 bg-gray-950 px-2 py-1 text-[11px] text-gray-100"
+            value={targetRow}
+            onChange={(e) => setTargetRow(e.target.value)}
+            placeholder="row"
+          />
+          <input
+            type="number"
+            min={0}
+            max={Math.max(0, mapSize - 1)}
+            className="w-full rounded border border-gray-600 bg-gray-950 px-2 py-1 text-[11px] text-gray-100"
+            value={targetCol}
+            onChange={(e) => setTargetCol(e.target.value)}
+            placeholder="col"
+          />
+        </div>
+        <div className="flex flex-wrap gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="!h-6 !min-h-0 !px-2 !py-0 !text-[10px]"
+            onClick={handleGoToTarget}
+          >
+            Go
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="!h-6 !min-h-0 !px-2 !py-0 !text-[10px]"
+            onClick={handleAddOrOpenAtTarget}
+          >
+            Add / Open
+          </Button>
+        </div>
+        <p className={`text-[9px] ${coordinateError ? "text-amber-300" : "text-gray-500"}`}>
+          {coordinateError ?? `Map bounds: 0-${Math.max(0, mapSize - 1)}.`}
+        </p>
+      </div>
       <p className="text-[10px] text-gray-500">
         {entries.length} spawner{entries.length === 1 ? "" : "s"} ({inView.length} in view) — Click a
         row (or a spawner tile on the map) to edit the label and relocate.{" "}
