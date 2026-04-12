@@ -442,6 +442,8 @@ export class Hud {
     if (!this.questJournalPanel.isVisible()) {
       this.activeQuestTrackerPanel.render(
         ctx,
+        gameState,
+        myPlayer,
         this.mapManager.getAuthoredQuests(),
         myPlayer?.getQuestProgressPayload() ?? null,
         minimapHudLayout.minimap,
