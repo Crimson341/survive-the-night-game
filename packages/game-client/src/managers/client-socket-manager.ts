@@ -18,7 +18,7 @@ import { ZombieHurtEvent } from "../../../game-shared/src/events/server-sent/eve
 import { ZombieAlertedEvent } from "../../../game-shared/src/events/server-sent/events/zombie-alerted-event";
 import { PongEvent } from "../../../game-shared/src/events/server-sent/events/pong-event";
 import { Input } from "../../../game-shared/src/util/input";
-import { RecipeType } from "../../../game-shared/src/util/recipes";
+import type { CraftRequestEventData } from "@shared/events/client-sent/events/craft-request";
 import { ServerUpdatingEvent } from "../../../game-shared/src/events/server-sent/events/server-updating-event";
 import { ChatMessageEvent } from "../../../game-shared/src/events/server-sent/events/chat-message-event";
 import { GameMessageEvent } from "../../../game-shared/src/events/server-sent/events/game-message-event";
@@ -34,6 +34,7 @@ import { BossSummonEvent } from "../../../game-shared/src/events/server-sent/eve
 import { BossSplitEvent } from "../../../game-shared/src/events/server-sent/events/boss-split-event";
 import { VersionMismatchEvent } from "../../../game-shared/src/events/server-sent/events/version-mismatch-event";
 import { AuthRequiredEvent } from "../../../game-shared/src/events/server-sent/events/auth-required-event";
+import { ProfileLoadFailedEvent } from "../../../game-shared/src/events/server-sent/events/profile-load-failed-event";
 import { UserBannedEvent } from "../../../game-shared/src/events/server-sent/events/user-banned-event";
 import { ISocketAdapter } from "@shared/network/socket-adapter";
 import { IClientAdapter } from "@shared/network/client-adapter";
@@ -79,6 +80,7 @@ const SERVER_EVENT_MAP = {
   [ServerSentEvents.VERSION_MISMATCH]: VersionMismatchEvent,
   [ServerSentEvents.AUTH_REQUIRED]: AuthRequiredEvent,
   [ServerSentEvents.USER_BANNED]: UserBannedEvent,
+  [ServerSentEvents.PROFILE_LOAD_FAILED]: ProfileLoadFailedEvent,
 } as const;
 
 export class ClientSocketManager {
@@ -458,8 +460,8 @@ export class ClientSocketManager {
     this.emitClientEvent(ClientSentEvents.PING_UPDATE, latency);
   }
 
-  public sendCraftRequest(recipe: RecipeType) {
-    this.emitClientEvent(ClientSentEvents.CRAFT_REQUEST, recipe);
+  public sendCraftRequest(request: CraftRequestEventData) {
+    this.emitClientEvent(ClientSentEvents.CRAFT_REQUEST, request);
   }
 
   public sendStartCrafting() {
@@ -538,8 +540,11 @@ export class ClientSocketManager {
     this.emitClientEvent(ClientSentEvents.INTERACT, { targetEntityId });
   }
 
-  public sendDialogueNpcComplete(npcEntityId: number) {
-    this.emitClientEvent(ClientSentEvents.DIALOGUE_NPC_COMPLETE, { npcEntityId });
+  public sendDialogueNpcComplete(npcEntityId: number, acceptQuest?: boolean) {
+    this.emitClientEvent(ClientSentEvents.DIALOGUE_NPC_COMPLETE, {
+      npcEntityId,
+      ...(acceptQuest === undefined ? {} : { acceptQuest }),
+    });
   }
 
   public sendChatMessage(message: string) {
@@ -566,7 +571,7 @@ export class ClientSocketManager {
   }
 
   public sendProgressionAllocations(
-    kind: "skill" | "character",
+    kind: "ability" | "character",
     allocations: Record<string, number>,
   ): void {
     this.emitClientEvent(ClientSentEvents.SET_PROGRESSION_ALLOCATIONS, { kind, allocations });

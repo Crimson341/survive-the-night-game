@@ -76,6 +76,7 @@ export class ClientEventHandlers {
     const hud = this.gameClient.getHud();
     const isFullscreenMapOpen = hud?.isFullscreenMapOpen() ?? false;
     const isInventoryOpen = hud?.isInventoryScreenOpen() ?? false;
+    const isCraftingPanelOpen = this.gameClient.getCraftingPanel().isVisible();
 
     // Update inventory bar hover state
     if (hud) {
@@ -83,8 +84,8 @@ export class ClientEventHandlers {
       hud.handleMouseMove(x, y, canvas.width, canvas.height);
     }
 
-    // Block aiming when fullscreen map or inventory screen is open
-    if (!isFullscreenMapOpen && !isInventoryOpen) {
+    // Block aiming when fullscreen map or a blocking panel is open
+    if (!isFullscreenMapOpen && !isInventoryOpen && !isCraftingPanelOpen) {
       // Access inputManager through private method - will need to expose getter
       const inputManager = (this.gameClient as any).inputManager;
       inputManager.updateMousePosition(x, y);
@@ -112,8 +113,15 @@ export class ClientEventHandlers {
     const gameState = this.gameClient.getGameState();
     const hud = this.gameClient.getHud();
     const merchantBuyPanel = (this.gameClient as any).merchantBuyPanel;
+    const craftingPanel = this.gameClient.getCraftingPanel();
     const placementManager = this.gameClient.getPlacementManager();
     const isFullscreenMapOpen = hud?.isFullscreenMapOpen() ?? false;
+    const isNpcDialogueOpen = gameState.openDialogueNpcId != null;
+
+    if (craftingPanel.isVisible() && craftingPanel.handleClick(x, y)) {
+      placementManager?.skipNextClick();
+      return;
+    }
 
     // Check merchant panel clicks (if open)
     if (merchantBuyPanel.isVisible() && merchantBuyPanel.handleClick(x, y)) {
@@ -127,8 +135,13 @@ export class ClientEventHandlers {
       return;
     }
 
-    // Block weapon firing when fullscreen map is open or inventory screen is open
-    if (isFullscreenMapOpen || (hud && hud.isInventoryScreenOpen())) {
+    // Block weapon firing when fullscreen map, inventory, crafting, or NPC dialogue is open
+    if (
+      isFullscreenMapOpen ||
+      (hud && hud.isInventoryScreenOpen()) ||
+      craftingPanel.isVisible() ||
+      isNpcDialogueOpen
+    ) {
       return;
     }
 
@@ -161,13 +174,15 @@ export class ClientEventHandlers {
 
     const hud = this.gameClient.getHud();
     const isFullscreenMapOpen = hud?.isFullscreenMapOpen() ?? false;
+    const isCraftingPanelOpen = this.gameClient.getCraftingPanel().isVisible();
+    const isNpcDialogueOpen = this.gameClient.getGameState().openDialogueNpcId != null;
 
     if (hud) {
       hud.handleMouseUp(x, y, canvas.width, canvas.height);
     }
 
     // Block weapon release when fullscreen map is open
-    if (!isFullscreenMapOpen) {
+    if (!isFullscreenMapOpen && !isCraftingPanelOpen && !isNpcDialogueOpen) {
       const inputManager = (this.gameClient as any).inputManager;
       inputManager.releaseFire();
     }

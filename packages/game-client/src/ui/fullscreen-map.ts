@@ -15,18 +15,28 @@ import { distance } from "@shared/util/physics";
 import { calculateLightSources, getCampsiteMapMarkerWorldPosition } from "./utils/map-rendering-utils";
 import { prerenderCollidables, renderCollidablesFromCanvas } from "./utils/map-collidable-renderer";
 import { renderFullscreenMapFogOfWar } from "./utils/map-fog-of-war-renderer";
+import {
+  drawRpgTopAccentBar,
+  fillRpgPanelGradient,
+  RPG_BODY_TEXT,
+  RPG_BORDER_GOLD,
+  RPG_METADATA_MUTED,
+  RPG_PANEL_GRADIENT_BOTTOM,
+  RPG_TITLE_CREAM,
+} from "./rpg-hud-theme";
+import { resolvePrimaryQuestTrackerForPlayer } from "./quest-tracker-runtime";
+
 const FULLSCREEN_MAP_SETTINGS = {
   padding: 180, // Padding from screen edges
-  background: "rgba(0, 0, 0, 0.95)",
-  borderColor: "rgba(255, 255, 255, 0.8)",
+  background: RPG_PANEL_GRADIENT_BOTTOM,
+  borderColor: RPG_BORDER_GOLD,
   borderWidth: 3,
   headerHeight: 60,
-  headerBackground: "rgba(0, 0, 0, 0.95)",
-  headerFont: "bold 28px Arial",
-  headerColor: "white",
+  headerFont: "bold 28px Georgia",
+  headerColor: RPG_TITLE_CREAM,
   buttonFont: "24px Arial",
-  buttonColor: "white",
-  buttonHoverColor: "rgba(255, 255, 255, 0.2)",
+  buttonColor: RPG_BODY_TEXT,
+  buttonHoverColor: "rgba(255, 223, 155, 0.15)",
   buttonPadding: 12,
   buttonGap: 10,
   zoomLevels: [0.3, 0.5, 0.7, 1.0, 1.5, 2.0], // Available zoom levels
@@ -139,9 +149,9 @@ export class FullScreenMap {
     const mapWidth = canvasWidth - settings.padding * 2;
     const mapHeight = canvasHeight - settings.padding * 2 - settings.headerHeight;
 
-    // Draw header background
-    ctx.fillStyle = settings.headerBackground;
-    ctx.fillRect(settings.padding, settings.padding, mapWidth, settings.headerHeight);
+    // Draw header background (RPG panel style)
+    fillRpgPanelGradient(ctx, settings.padding, settings.padding, mapWidth, settings.headerHeight);
+    drawRpgTopAccentBar(ctx, settings.padding, settings.padding, mapWidth, 4);
 
     // Draw header border
     ctx.strokeStyle = settings.borderColor;
@@ -154,14 +164,23 @@ export class FullScreenMap {
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     const headerY = settings.padding + settings.headerHeight / 2;
-    ctx.fillText("Map (Press M to close)", settings.padding + 20, headerY);
+    const playerTileRow = Math.floor(playerPos.y / this.tileSize);
+    const playerTileCol = Math.floor(playerPos.x / this.tileSize);
+    ctx.fillText("Map (Press M to close)", settings.padding + 20, headerY - 10);
+
+    ctx.font = "16px Arial";
+    ctx.fillStyle = "rgba(180, 255, 255, 0.95)";
+    ctx.fillText(
+      `Tile row ${playerTileRow}, col ${playerTileCol}`,
+      settings.padding + 20,
+      headerY + 14
+    );
 
     // Draw zoom controls in header (right side)
     this.renderZoomControls(ctx, canvasWidth, headerY);
 
     // Draw map background
-    ctx.fillStyle = settings.background;
-    ctx.fillRect(mapX, mapY, mapWidth, mapHeight);
+    fillRpgPanelGradient(ctx, mapX, mapY, mapWidth, mapHeight);
 
     // Clip to map area
     ctx.save();
@@ -255,6 +274,18 @@ export class FullScreenMap {
       mapHeight
     );
 
+    this.renderQuestTargetIndicator(
+      ctx,
+      gameState,
+      myPlayer,
+      effectiveCenterPos,
+      zoom,
+      centerX,
+      centerY,
+      mapWidth,
+      mapHeight
+    );
+
     ctx.restore(); // Restore from clip
 
     // Draw map border
@@ -300,7 +331,7 @@ export class FullScreenMap {
     ctx.fillStyle =
       this.currentZoomIndex < FULLSCREEN_MAP_SETTINGS.zoomLevels.length - 1
         ? settings.buttonColor
-        : "rgba(255, 255, 255, 0.3)";
+        : RPG_METADATA_MUTED;
     ctx.strokeStyle = settings.borderColor;
     ctx.lineWidth = 2;
     ctx.strokeRect(zoomInX, zoomInY, buttonSize, buttonSize);
@@ -322,11 +353,73 @@ export class FullScreenMap {
       height: buttonSize,
     };
 
-    ctx.fillStyle = this.currentZoomIndex > 0 ? settings.buttonColor : "rgba(255, 255, 255, 0.3)";
+    ctx.fillStyle = this.currentZoomIndex > 0 ? settings.buttonColor : RPG_METADATA_MUTED;
     ctx.strokeStyle = settings.borderColor;
     ctx.lineWidth = 2;
     ctx.strokeRect(zoomOutX, zoomOutY, buttonSize, buttonSize);
     ctx.fillText("-", zoomOutX + buttonSize / 2, buttonY);
+  }
+
+  private renderQuestTargetIndicator(
+    ctx: CanvasRenderingContext2D,
+    gameState: GameState,
+    myPlayer: PlayerClient,
+    centerWorldPos: { x: number; y: number },
+    zoom: number,
+    centerX: number,
+    centerY: number,
+    mapWidth: number,
+    mapHeight: number
+  ): void {
+    const tracker = resolvePrimaryQuestTrackerForPlayer(
+      gameState,
+      myPlayer,
+      this.mapManager.getAuthoredQuests(),
+      myPlayer.getQuestProgressPayload()
+    );
+    if (!tracker?.target) {
+      return;
+    }
+
+    const offsetX = (tracker.target.worldX - centerWorldPos.x) * zoom;
+    const offsetY = (tracker.target.worldY - centerWorldPos.y) * zoom;
+    const inset = 18;
+    const clampedOffsetX = Math.max(
+      -(mapWidth / 2 - inset),
+      Math.min(mapWidth / 2 - inset, offsetX)
+    );
+    const clampedOffsetY = Math.max(
+      -(mapHeight / 2 - inset),
+      Math.min(mapHeight / 2 - inset, offsetY)
+    );
+    const drawX = centerX + clampedOffsetX;
+    const drawY = centerY + clampedOffsetY;
+    const isTurnIn = tracker.target.kind === "turn_in";
+    const pulse = 1 + Math.sin(Date.now() * 0.01) * 0.12;
+    const markerRadius = 12 * Math.max(0.85, zoom) * pulse;
+
+    ctx.save();
+    ctx.fillStyle = isTurnIn ? "rgba(99, 240, 174, 0.18)" : "rgba(255, 216, 107, 0.18)";
+    ctx.beginPath();
+    ctx.arc(drawX, drawY, markerRadius + 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = isTurnIn ? "rgba(99, 240, 174, 0.98)" : "rgba(255, 216, 107, 0.98)";
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(drawX, drawY - markerRadius);
+    ctx.lineTo(drawX + markerRadius, drawY);
+    ctx.lineTo(drawX, drawY + markerRadius);
+    ctx.lineTo(drawX - markerRadius, drawY);
+    ctx.closePath();
+    ctx.stroke();
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `bold ${Math.max(12, Math.round(12 * Math.max(1, zoom)))}px Arial`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(isTurnIn ? "?" : "!", drawX, drawY + 0.5);
+    ctx.restore();
   }
 
   private prerenderCollidables(): void {

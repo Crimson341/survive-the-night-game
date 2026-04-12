@@ -5,6 +5,7 @@ import { calculateHudScale } from "@/util/hud-scale";
 import { ClientPoison } from "@/extensions/poison";
 import type { MinimapHudLayout } from "@/ui/minimap-hud-group-layout";
 import { renderLiquidResourceOrb } from "@/util/liquid-resource-orb";
+import { RPG_BORDER_GOLD, RPG_ORB_EMPTY } from "@/ui/rpg-hud-theme";
 
 interface HeartsPanelSettings extends PanelSettings {
   fontPx: number;
@@ -32,9 +33,9 @@ export class HeartsPanel extends Panel {
     const fraction = maxHealth > 0 ? currentHealth / maxHealth : 0;
     const isPoisoned = player.hasExt(ClientPoison);
 
-    const fillColor = isPoisoned ? "rgba(80, 200, 90, 0.95)" : "rgba(200, 50, 55, 0.95)";
-    const emptyColor = "rgba(25, 10, 12, 0.92)";
-    const borderColor = isPoisoned ? "rgba(120, 220, 130, 0.95)" : "rgba(180, 60, 65, 0.95)";
+    const fillColor = isPoisoned ? "rgba(80, 200, 90, 0.95)" : "rgba(132, 14, 26, 0.96)";
+    const emptyColor = RPG_ORB_EMPTY;
+    const borderColor = isPoisoned ? "rgba(120, 220, 130, 0.95)" : RPG_BORDER_GOLD;
 
     const { cx, cy, r } = layout.healthOrb;
     const scaledFont = Math.max(10, Math.round(this.heartSettings.fontPx * hudScale));

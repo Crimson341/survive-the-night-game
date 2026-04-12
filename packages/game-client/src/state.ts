@@ -17,7 +17,7 @@ export type GameState = {
   crafting: boolean;
   serverTimeOffset: number;
   closestInteractiveEntityId?: number | null;
-  /** When set, client shows speech bubble for this dialogue_survivor_npc entity id. */
+  /** When set, client shows the bottom dialogue panel for this NPC/decal entity id. */
   openDialogueNpcId?: number | null;
   /** 0-based index into current NPC dialogue lines (client-only). */
   dialogueLineIndex: number;

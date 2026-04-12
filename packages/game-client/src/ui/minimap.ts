@@ -20,6 +20,9 @@ import { calculateLightSources, getCampsiteMapMarkerWorldPosition } from "./util
 import { prerenderCollidables, renderCollidablesFromCanvas } from "./utils/map-collidable-renderer";
 import { renderMinimapFogOfWar } from "./utils/map-fog-of-war-renderer";
 import type { MinimapScreenRect } from "./minimap-hud-group-layout";
+import { calculateHudScale } from "@/util/hud-scale";
+import { RPG_BORDER_GOLD, RPG_MINIMAP_BACKGROUND } from "@/ui/rpg-hud-theme";
+import { resolvePrimaryQuestTrackerForPlayer } from "./quest-tracker-runtime";
 
 // Performance optimization constants - adjust these to balance quality vs performance
 // To view performance stats in console, run:
@@ -47,8 +50,8 @@ export const MINIMAP_RENDER_DISTANCE = {
 export const MINIMAP_SETTINGS = {
   size: 240, // Reduced from 280 (was 400 originally)
   /** Inset from screen right; screen position comes from minimap-hud-group-layout + Hud. */
-  right: 40,
-  background: "rgba(0, 0, 0, 0.7)",
+  right: 52,
+  background: RPG_MINIMAP_BACKGROUND,
   scale: 0.35,
   fogOfWar: {
     enabled: true,
@@ -327,8 +330,8 @@ export class Minimap {
     perfTimer.end("minimap:survivors");
 
     // Draw radar circle border using scaled values
-    ctx.strokeStyle = "white";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = RPG_BORDER_GOLD;
+    ctx.lineWidth = Math.max(2, Math.round(2 * calculateHudScale(canvasWidth, canvasHeight)));
     ctx.beginPath();
     ctx.arc(scaledLeft + scaledSize / 2, top + scaledSize / 2, scaledSize / 2, 0, Math.PI * 2);
     ctx.stroke();
@@ -364,8 +367,73 @@ export class Minimap {
     this.renderBiomeIndicators(ctx, gameState, playerPos, settings, top, scaledLeft, scaledSize);
     perfTimer.end("minimap:biomes");
 
+    this.renderQuestTargetIndicator(ctx, gameState, myPlayer, settings, top, scaledLeft, scaledSize);
+
     ctx.restore();
     perfTimer.end("minimap:total");
+  }
+
+  private renderQuestTargetIndicator(
+    ctx: CanvasRenderingContext2D,
+    gameState: GameState,
+    myPlayer: PlayerClient,
+    settings: typeof MINIMAP_SETTINGS,
+    top: number,
+    scaledLeft: number,
+    scaledSize: number
+  ): void {
+    const tracker = resolvePrimaryQuestTrackerForPlayer(
+      gameState,
+      myPlayer,
+      this.mapManager.getAuthoredQuests(),
+      myPlayer.getQuestProgressPayload()
+    );
+    if (!tracker?.target || !myPlayer.hasExt(ClientPositionable)) {
+      return;
+    }
+
+    const playerPos = myPlayer.getExt(ClientPositionable).getCenterPosition();
+    const centerX = scaledLeft + scaledSize / 2;
+    const centerY = top + scaledSize / 2;
+    const radius = scaledSize / 2;
+    const relativeX = tracker.target.worldX - playerPos.x;
+    const relativeY = tracker.target.worldY - playerPos.y;
+    const angle = Math.atan2(relativeY, relativeX);
+    const projectedX = centerX + relativeX * settings.scale;
+    const projectedY = centerY + relativeY * settings.scale;
+    const edgeInset = 16;
+    const maxDist = radius - edgeInset;
+    const distFromCenter = Math.hypot(projectedX - centerX, projectedY - centerY);
+    const drawX =
+      distFromCenter <= maxDist ? projectedX : centerX + Math.cos(angle) * maxDist;
+    const drawY =
+      distFromCenter <= maxDist ? projectedY : centerY + Math.sin(angle) * maxDist;
+    const isTurnIn = tracker.target.kind === "turn_in";
+    const pulse = 1 + Math.sin(Date.now() * 0.01) * 0.12;
+    const markerRadius = 8 * pulse;
+
+    ctx.save();
+    ctx.fillStyle = isTurnIn ? "rgba(99, 240, 174, 0.22)" : "rgba(255, 216, 107, 0.22)";
+    ctx.beginPath();
+    ctx.arc(drawX, drawY, markerRadius + 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = isTurnIn ? "rgba(99, 240, 174, 0.95)" : "rgba(255, 216, 107, 0.95)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(drawX, drawY - markerRadius);
+    ctx.lineTo(drawX + markerRadius, drawY);
+    ctx.lineTo(drawX, drawY + markerRadius);
+    ctx.lineTo(drawX - markerRadius, drawY);
+    ctx.closePath();
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
+    ctx.font = "bold 10px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(isTurnIn ? "?" : "!", drawX, drawY + 0.5);
+    ctx.restore();
   }
 
   private renderBiomeIndicators(

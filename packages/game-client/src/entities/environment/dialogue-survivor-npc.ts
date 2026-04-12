@@ -105,6 +105,25 @@ export class DialogueSurvivorNpcClient extends ClientEntity implements Renderabl
     return pickDialogueNpcSession(this.dialogueSessions, st, hasItemType, ctx);
   }
 
+  public getActiveDialogueSession(gameState: GameState): WorldMapDialogueNpcSession {
+    return this.pickSession(gameState);
+  }
+
+  public getPendingQuestOfferId(gameState: GameState): string | null {
+    const grant = String(this.getActiveDialogueSession(gameState).grantQuestId ?? "").trim();
+    if (!grant) {
+      return null;
+    }
+
+    const player = getPlayer(gameState);
+    const st = player?.getQuestProgressPayload() ?? emptyPlayerQuestState();
+    if (st.completed.includes(grant) || st.active[grant] !== undefined) {
+      return null;
+    }
+
+    return grant;
+  }
+
   /** Lines for the active session. */
   public getDialogueLines(gameState: GameState): string[] {
     const lines = this.pickSession(gameState).lines;
@@ -135,6 +154,10 @@ export class DialogueSurvivorNpcClient extends ClientEntity implements Renderabl
     const interactive = this.getExt(ClientInteractive);
 
     if (!myPlayer || myPlayer.getId() === this.getId() || myPlayer.isZombiePlayer()) {
+      return;
+    }
+
+    if (gameState.openDialogueNpcId === this.getId()) {
       return;
     }
 
