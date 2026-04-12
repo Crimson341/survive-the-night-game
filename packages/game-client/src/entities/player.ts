@@ -22,7 +22,7 @@ import { itemRegistry } from "@shared/entities";
 import { roundVector2, distance } from "../../../game-shared/src/util/physics";
 import { RawEntity } from "@shared/types/entity";
 import { IClientEntity, Renderable, getFrameIndex, drawHealthBar } from "@/entities/util";
-import { getConfig } from "@shared/config";
+import { getConfig, playerConfig } from "@shared/config";
 import Vector2 from "@shared/util/vector2";
 import PoolManager from "@shared/util/pool-manager";
 import { ClientEntity } from "./client-entity";
@@ -33,13 +33,21 @@ import {
   sumCharacterAllocations,
   computeMaxInventorySlots,
 } from "@shared/util/character-stats";
-import { sumSkillAllocations } from "@shared/util/skill-tree";
+import { sumAbilityAllocations } from "@shared/util/ability-tree";
 import { getProgressionPointsBudget } from "@shared/util/experience-level";
 import { FISTS_INVENTORY_SENTINEL } from "@shared/constants/inventory-sentinel";
 import {
   parsePlayerQuestState,
   type PlayerQuestStatePayload,
 } from "@shared/quests/player-quest-state";
+import {
+  emptyProfessionProgress,
+  getProfessionDetails,
+  getProfessionLevelFromXp,
+  normalizeProfessionProgress,
+  type ProfessionId,
+  type ProfessionProgress,
+} from "@shared/util/professions";
 
 export class PlayerClient extends ClientEntity implements IClientEntity, Renderable {
   private readonly ARROW_LENGTH = 20;
@@ -56,8 +64,8 @@ export class PlayerClient extends ClientEntity implements IClientEntity, Rendera
   private experience: number = 0;
   private ping: number = 0;
   private displayName: string = "";
-  private stamina: number = 100;
-  private maxStamina: number = 100;
+  private stamina: number = playerConfig.MAX_STAMINA;
+  private maxStamina: number = playerConfig.MAX_STAMINA;
   private pickupProgress: number = 0; // Client-only field for interact hold progress
   private serverGhostPos: Vector2 | null = null;
   private deathTime: number = 0; // Timestamp when player died, 0 means not dead
@@ -66,8 +74,9 @@ export class PlayerClient extends ClientEntity implements IClientEntity, Rendera
   private isZombie: boolean = false; // Whether this player has become a zombie (Battle Royale)
   private zombieSpawnCooldownProgress: number = 1; // 0-1 progress for zombie spawn ability (1 = ready)
 
-  private skillSprint: number = 0;
-  private skillRegenerate: number = 0;
+  private abilitySprint: number = 0;
+  private abilityRegenerate: number = 0;
+  private professionProgress: ProfessionProgress = emptyProfessionProgress();
   private statHealth: number = 0;
   private statEvade: number = 0;
   private statAccuracy: number = 0;
@@ -118,8 +127,8 @@ export class PlayerClient extends ClientEntity implements IClientEntity, Rendera
     this.experience = (data as any).experience ?? 0;
     this.ping = data.ping || 0;
     this.displayName = data.displayName || "Unknown";
-    this.stamina = data.stamina ?? 100;
-    this.maxStamina = data.maxStamina ?? 100;
+    this.stamina = data.stamina ?? playerConfig.MAX_STAMINA;
+    this.maxStamina = data.maxStamina ?? playerConfig.MAX_STAMINA;
     this.pickupProgress = data.pickupProgress ?? 0;
     this.deathTime = data.deathTime ?? 0;
     this.isAI = (data as any).isAI ?? false;
@@ -130,8 +139,19 @@ export class PlayerClient extends ClientEntity implements IClientEntity, Rendera
   }
 
   private syncProgressionFromData(data: Record<string, unknown>): void {
-    this.skillSprint = Number(data.skillSprint) || 0;
-    this.skillRegenerate = Number(data.skillRegenerate) || 0;
+    this.abilitySprint = Number((data as any).abilitySprint ?? (data as any).skillSprint) || 0;
+    this.abilityRegenerate =
+      Number((data as any).abilityRegenerate ?? (data as any).skillRegenerate) || 0;
+    const rawProfessionProgress = (data as any).professionProgressJson;
+    if (typeof rawProfessionProgress === "string" && rawProfessionProgress.trim() !== "") {
+      try {
+        this.professionProgress = normalizeProfessionProgress(JSON.parse(rawProfessionProgress));
+      } catch {
+        this.professionProgress = emptyProfessionProgress();
+      }
+    } else {
+      this.professionProgress = emptyProfessionProgress();
+    }
     this.statHealth = Number(data.statHealth) || 0;
     this.statEvade = Number((data as any).statEvade ?? (data as any).statDefence) || 0;
     this.statAccuracy = Number(data.statAccuracy) || 0;
@@ -596,13 +616,17 @@ export class PlayerClient extends ClientEntity implements IClientEntity, Rendera
     return this.experience;
   }
 
-  public getAvailableSkillPoints(): number {
+  public getAvailableAbilityPoints(): number {
     const budget = getProgressionPointsBudget(this.experience);
-    const spent = sumSkillAllocations({
-      sprint: this.skillSprint,
-      regenerate: this.skillRegenerate,
+    const spent = sumAbilityAllocations({
+      sprint: this.abilitySprint,
+      regenerate: this.abilityRegenerate,
     });
     return Math.max(0, budget - spent);
+  }
+
+  public getAvailableSkillPoints(): number {
+    return this.getAvailableAbilityPoints();
   }
 
   public getAvailableCharacterPoints(): number {
@@ -622,12 +646,32 @@ export class PlayerClient extends ClientEntity implements IClientEntity, Rendera
     return Math.max(0, budget - spent);
   }
 
+  public getAbilitySprintRank(): number {
+    return this.abilitySprint;
+  }
+
+  public getAbilityRegenerateRank(): number {
+    return this.abilityRegenerate;
+  }
+
   public getSkillSprintRank(): number {
-    return this.skillSprint;
+    return this.getAbilitySprintRank();
   }
 
   public getSkillRegenerateRank(): number {
-    return this.skillRegenerate;
+    return this.getAbilityRegenerateRank();
+  }
+
+  public getProfessionProgressRecord(): ProfessionProgress {
+    return { ...this.professionProgress };
+  }
+
+  public getProfessionLevel(professionId: ProfessionId): number {
+    return getProfessionLevelFromXp(this.professionProgress[professionId] ?? 0);
+  }
+
+  public getProfessionDetails(professionId: ProfessionId) {
+    return getProfessionDetails(professionId, this.professionProgress);
   }
 
   public getCharacterStat(stat: string): number {

@@ -3,12 +3,27 @@ import { MessageDecalClient } from "@/entities/environment/message-decal";
 import { AssetManager } from "@/managers/asset";
 import { GameState, getEntityById } from "@/state";
 import { calculateHudScale } from "@/util/hud-scale";
+import {
+  drawRpgTopAccentBar,
+  fillRpgPanelGradient,
+  RPG_BODY_TEXT,
+  RPG_COUNTER_GOLD,
+  RPG_METADATA_MUTED,
+  RPG_PROMPT_GOLD,
+  RPG_PROMPT_TYPING,
+  RPG_SLOT_FILL,
+  RPG_SLOT_STROKE,
+  RPG_TITLE_CREAM,
+  strokeRpgPanelBorder,
+} from "@/ui/rpg-hud-theme";
 import { getConfig } from "@shared/config";
 import { Direction } from "@shared/util/direction";
 
 const TYPEWRITER_MS_PER_CHAR = 24;
 const PANEL_OPEN_SPEED = 7;
 const PANEL_CLOSE_SPEED = 10;
+
+type DialogueButtonAction = "accept" | "decline";
 
 type DialogueSnapshot = {
   entityId: number;
@@ -18,13 +33,19 @@ type DialogueSnapshot = {
   speaker: string;
   footer: string;
   showPortrait: boolean;
+  hasQuestOfferChoice: boolean;
 };
 
-function wrapText(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  maxWidth: number,
-): string[] {
+type DialogueButtonRect = {
+  action: DialogueButtonAction;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
   const words = text.split(/\s+/);
   const lines: string[] = [];
   let line = "";
@@ -64,6 +85,9 @@ export class DialoguePanel {
   private revealStartedAt = 0;
   private revealInstantly = false;
   private lastSnapshot: DialogueSnapshot | null = null;
+  private buttonRects: DialogueButtonRect[] = [];
+  private mouseX = -Infinity;
+  private mouseY = -Infinity;
 
   constructor(private assetManager: AssetManager) {}
 
@@ -100,6 +124,28 @@ export class DialoguePanel {
     return true;
   }
 
+  public updateMousePosition(x: number, y: number): void {
+    this.mouseX = x;
+    this.mouseY = y;
+  }
+
+  public handleClick(x: number, y: number, gameState: GameState): DialogueButtonAction | null {
+    const now = performance.now();
+    const snapshot = this.resolveSnapshot(gameState);
+    this.syncSnapshot(snapshot, now);
+
+    if (!snapshot) {
+      return null;
+    }
+
+    const isFullyRevealed = this.getVisibleCharacterCount(snapshot, now) >= snapshot.line.length;
+    if (!snapshot.hasQuestOfferChoice || !isFullyRevealed) {
+      return null;
+    }
+
+    return this.getButtonActionAt(x, y);
+  }
+
   public render(ctx: CanvasRenderingContext2D, gameState: GameState): void {
     const now = performance.now();
     const snapshot = this.resolveSnapshot(gameState);
@@ -108,6 +154,7 @@ export class DialoguePanel {
 
     const renderSnapshot = snapshot ?? this.lastSnapshot;
     if (!renderSnapshot || this.visibilityProgress <= 0.001) {
+      this.buttonRects = [];
       if (!snapshot && this.visibilityProgress <= 0.001) {
         this.lastSnapshot = null;
       }
@@ -127,9 +174,7 @@ export class DialoguePanel {
       height - panelHeight - bottomMargin + Math.round((1 - easedProgress) * hiddenOffset);
     const innerPad = Math.max(12, Math.round(18 * scale));
     const accentHeight = Math.max(4, Math.round(5 * scale));
-    const portraitBoxSize = renderSnapshot.showPortrait
-      ? Math.max(72, Math.round(98 * scale))
-      : 0;
+    const portraitBoxSize = renderSnapshot.showPortrait ? Math.max(72, Math.round(98 * scale)) : 0;
     const portraitGap = renderSnapshot.showPortrait ? Math.max(10, Math.round(14 * scale)) : 0;
     const headerHeight = Math.max(26, Math.round(30 * scale));
     const footerHeight = Math.max(22, Math.round(24 * scale));
@@ -145,18 +190,9 @@ export class DialoguePanel {
     ctx.fillStyle = backgroundFade;
     ctx.fillRect(0, height - panelBottomFadeHeight, width, panelBottomFadeHeight);
 
-    const outerGradient = ctx.createLinearGradient(x, y, x, y + panelHeight);
-    outerGradient.addColorStop(0, "rgba(16, 18, 31, 0.98)");
-    outerGradient.addColorStop(1, "rgba(6, 8, 16, 0.95)");
-    ctx.fillStyle = outerGradient;
-    ctx.fillRect(x, y, panelWidth, panelHeight);
-
-    ctx.strokeStyle = "rgba(255, 234, 182, 0.8)";
-    ctx.lineWidth = Math.max(2, Math.round(2 * scale));
-    ctx.strokeRect(x, y, panelWidth, panelHeight);
-
-    ctx.fillStyle = "rgba(240, 198, 108, 0.96)";
-    ctx.fillRect(x, y, panelWidth, accentHeight);
+    fillRpgPanelGradient(ctx, x, y, panelWidth, panelHeight);
+    strokeRpgPanelBorder(ctx, x, y, panelWidth, panelHeight, Math.max(2, Math.round(2 * scale)));
+    drawRpgTopAccentBar(ctx, x, y, panelWidth, accentHeight);
 
     const contentTop = y + innerPad;
     const portraitX = x + innerPad;
@@ -168,26 +204,32 @@ export class DialoguePanel {
     const lineCounter = `${renderSnapshot.lineIndex + 1}/${renderSnapshot.totalLines}`;
     const visibleChars = this.getVisibleCharacterCount(renderSnapshot, now);
     const isFullyRevealed = visibleChars >= renderSnapshot.line.length;
+    const showingQuestOfferChoice = renderSnapshot.hasQuestOfferChoice && isFullyRevealed;
     const visibleText = isFullyRevealed
       ? renderSnapshot.line
       : `${renderSnapshot.line.slice(0, visibleChars)}|`;
     const interactionKey = String(getConfig().keybindings.INTERACT || "E").toUpperCase();
+    const footerButtonTop = y + panelHeight - innerPad - Math.max(28, Math.round(32 * scale));
+    const buttonRects = showingQuestOfferChoice
+      ? this.createQuestOfferButtons(bodyX, x + panelWidth - innerPad, footerButtonTop, scale)
+      : [];
+    this.buttonRects = buttonRects;
 
     ctx.font = `bold ${Math.max(14, Math.round(18 * scale))}px Georgia`;
     ctx.textBaseline = "top";
     ctx.textAlign = "left";
-    ctx.fillStyle = "#f8f2dc";
+    ctx.fillStyle = RPG_TITLE_CREAM;
     ctx.fillText(renderSnapshot.speaker, bodyX, contentTop);
 
     ctx.textAlign = "right";
-    ctx.fillStyle = "rgba(255, 215, 132, 0.88)";
+    ctx.fillStyle = RPG_COUNTER_GOLD;
     ctx.font = `bold ${Math.max(11, Math.round(13 * scale))}px Arial`;
     ctx.fillText(lineCounter, x + panelWidth - innerPad, contentTop + Math.round(2 * scale));
 
     if (renderSnapshot.showPortrait) {
-      ctx.fillStyle = "rgba(29, 35, 53, 0.98)";
+      ctx.fillStyle = RPG_SLOT_FILL;
       ctx.fillRect(portraitX, portraitY, portraitBoxSize, portraitBoxSize);
-      ctx.strokeStyle = "rgba(255, 223, 155, 0.78)";
+      ctx.strokeStyle = RPG_SLOT_STROKE;
       ctx.lineWidth = Math.max(2, Math.round(2 * scale));
       ctx.strokeRect(portraitX, portraitY, portraitBoxSize, portraitBoxSize);
 
@@ -221,7 +263,7 @@ export class DialoguePanel {
     ctx.clip();
 
     ctx.font = `${Math.max(13, Math.round(16 * scale))}px Arial`;
-    ctx.fillStyle = "#f4f7ff";
+    ctx.fillStyle = RPG_BODY_TEXT;
     const wrappedLines = wrapText(ctx, visibleText, bodyWidth);
     const lineHeight = Math.max(18, Math.round(22 * scale));
     for (let index = 0; index < wrappedLines.length; index++) {
@@ -234,22 +276,26 @@ export class DialoguePanel {
     }
     ctx.restore();
 
-    ctx.font = `bold ${Math.max(10, Math.round(12 * scale))}px Arial`;
-    ctx.textAlign = "left";
-    ctx.fillStyle = isFullyRevealed ? "rgba(255, 223, 155, 0.95)" : "rgba(165, 218, 255, 0.95)";
-    ctx.fillText(
-      isFullyRevealed ? renderSnapshot.footer : `${interactionKey} to finish line`,
-      bodyX,
-      y + panelHeight - innerPad - footerHeight + Math.round(4 * scale),
-    );
+    if (showingQuestOfferChoice && buttonRects.length > 0) {
+      this.renderQuestOfferButtons(ctx, buttonRects, scale);
+    } else {
+      ctx.font = `bold ${Math.max(10, Math.round(12 * scale))}px Arial`;
+      ctx.textAlign = "left";
+      ctx.fillStyle = isFullyRevealed ? RPG_PROMPT_GOLD : RPG_PROMPT_TYPING;
+      ctx.fillText(
+        isFullyRevealed ? renderSnapshot.footer : `${interactionKey} to finish line`,
+        bodyX,
+        y + panelHeight - innerPad - footerHeight + Math.round(4 * scale),
+      );
 
-    ctx.textAlign = "right";
-    ctx.fillStyle = "rgba(140, 154, 188, 0.9)";
-    ctx.fillText(
-      isFullyRevealed ? "RPG dialogue" : "Typing...",
-      x + panelWidth - innerPad,
-      y + panelHeight - innerPad - footerHeight + Math.round(4 * scale),
-    );
+      ctx.textAlign = "right";
+      ctx.fillStyle = RPG_METADATA_MUTED;
+      ctx.fillText(
+        isFullyRevealed ? "RPG dialogue" : "Typing...",
+        x + panelWidth - innerPad,
+        y + panelHeight - innerPad - footerHeight + Math.round(4 * scale),
+      );
+    }
 
     ctx.restore();
   }
@@ -271,11 +317,10 @@ export class DialoguePanel {
         totalLines,
         line: entity.getDialogueLineAt(lineIndex, gameState),
         speaker: entity.displayName?.trim() || "Survivor",
-        footer:
-          lineIndex >= totalLines - 1
-            ? `${keyName} to close`
-            : `${keyName} to continue`,
+        footer: lineIndex >= totalLines - 1 ? `${keyName} to close` : `${keyName} to continue`,
         showPortrait: true,
+        hasQuestOfferChoice:
+          lineIndex >= totalLines - 1 && entity.getPendingQuestOfferId(gameState) !== null,
       };
     }
 
@@ -289,11 +334,9 @@ export class DialoguePanel {
         totalLines,
         line: entity.getLineAt(lineIndex),
         speaker: "Notice",
-        footer:
-          lineIndex >= totalLines - 1
-            ? `${keyName} to close`
-            : `${keyName} to continue`,
+        footer: lineIndex >= totalLines - 1 ? `${keyName} to close` : `${keyName} to continue`,
         showPortrait: false,
+        hasQuestOfferChoice: false,
       };
     }
 
@@ -301,9 +344,7 @@ export class DialoguePanel {
   }
 
   private syncSnapshot(snapshot: DialogueSnapshot | null, now: number): void {
-    const snapshotKey = snapshot
-      ? `${snapshot.entityId}:${snapshot.lineIndex}:${snapshot.line}`
-      : null;
+    const snapshotKey = snapshot ? `${snapshot.entityId}:${snapshot.lineIndex}:${snapshot.line}` : null;
 
     if (snapshotKey !== this.activeLineKey) {
       this.activeLineKey = snapshotKey;
@@ -335,6 +376,7 @@ export class DialoguePanel {
       this.lastSnapshot = null;
       this.activeLineKey = null;
       this.revealInstantly = false;
+      this.buttonRects = [];
     }
   }
 
@@ -352,5 +394,90 @@ export class DialoguePanel {
       0,
       snapshot.line.length,
     );
+  }
+
+  private createQuestOfferButtons(
+    left: number,
+    right: number,
+    top: number,
+    scale: number,
+  ): DialogueButtonRect[] {
+    const gap = Math.max(10, Math.round(12 * scale));
+    const height = Math.max(28, Math.round(32 * scale));
+    const acceptWidth = Math.max(132, Math.round(168 * scale));
+    const declineWidth = Math.max(122, Math.round(150 * scale));
+    const declineX = right - declineWidth;
+    const acceptX = declineX - gap - acceptWidth;
+
+    if (acceptX < left) {
+      return [];
+    }
+
+    return [
+      {
+        action: "accept",
+        label: "Accept quest",
+        x: acceptX,
+        y: top,
+        width: acceptWidth,
+        height,
+      },
+      {
+        action: "decline",
+        label: "Not now",
+        x: declineX,
+        y: top,
+        width: declineWidth,
+        height,
+      },
+    ];
+  }
+
+  private renderQuestOfferButtons(
+    ctx: CanvasRenderingContext2D,
+    buttonRects: DialogueButtonRect[],
+    scale: number,
+  ): void {
+    ctx.font = `bold ${Math.max(11, Math.round(13 * scale))}px Arial`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    for (const button of buttonRects) {
+      const hovered = this.isPointInRect(this.mouseX, this.mouseY, button);
+      ctx.fillStyle =
+        button.action === "accept"
+          ? hovered
+            ? "rgba(97, 174, 126, 0.98)"
+            : "rgba(71, 136, 96, 0.96)"
+          : hovered
+            ? "rgba(108, 118, 140, 0.98)"
+            : "rgba(67, 74, 92, 0.96)";
+      ctx.fillRect(button.x, button.y, button.width, button.height);
+
+      ctx.strokeStyle =
+        button.action === "accept" ? "rgba(206, 255, 221, 0.95)" : "rgba(216, 223, 240, 0.92)";
+      ctx.lineWidth = Math.max(2, Math.round(2 * scale));
+      ctx.strokeRect(button.x, button.y, button.width, button.height);
+
+      ctx.fillStyle = "#f7f8fc";
+      ctx.fillText(
+        button.label,
+        button.x + button.width / 2,
+        button.y + button.height / 2 + Math.round(scale * 0.5),
+      );
+    }
+  }
+
+  private getButtonActionAt(x: number, y: number): DialogueButtonAction | null {
+    for (const button of this.buttonRects) {
+      if (this.isPointInRect(x, y, button)) {
+        return button.action;
+      }
+    }
+    return null;
+  }
+
+  private isPointInRect(x: number, y: number, rect: DialogueButtonRect): boolean {
+    return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
   }
 }

@@ -27,8 +27,20 @@ import { InventoryItem, type EquipmentSlotKey } from "../../../game-shared/src/u
 import { ClientInventory } from "@/extensions/inventory";
 import { renderRadialProgressIndicator } from "@/util/radial-progress-indicator";
 import { getMinimapHudLayout } from "./minimap-hud-group-layout";
+import {
+  hitTestMinimapInventoryMenu,
+  renderMinimapInventoryMenu,
+} from "./minimap-inventory-menu";
 import { QuestJournalPanel } from "./quest-journal-panel";
 import { DialoguePanel } from "./dialogue-panel";
+import {
+  RPG_BODY_TEXT,
+  RPG_BORDER_GOLD,
+  RPG_HUD_PANEL_BG,
+  RPG_PANEL_GRADIENT_TOP,
+  RPG_TITLE_CREAM,
+} from "./rpg-hud-theme";
+import { ActiveQuestTrackerPanel } from "./active-quest-tracker-panel";
 
 const HUD_SETTINGS = {
   GameMessages: {
@@ -37,7 +49,7 @@ const HUD_SETTINGS = {
     borderColor: "transparent",
     borderWidth: 0,
     font: "24px Arial",
-    textColor: "white",
+    textColor: RPG_BODY_TEXT,
     top: 120,
     gap: 40,
     messageTimeout: 5000,
@@ -48,9 +60,9 @@ const HUD_SETTINGS = {
     borderColor: "transparent",
     borderWidth: 0,
     font: "24px Arial",
-    textColor: "black",
-    overlayBackground: "rgba(0, 0, 0, 0.7)",
-    panelBackground: "white",
+    textColor: RPG_BODY_TEXT,
+    overlayBackground: "rgba(0, 0, 0, 0.75)",
+    panelBackground: RPG_PANEL_GRADIENT_TOP,
     text: "Press any key to respawn",
   },
   // Note: CrateIndicators, SurvivorIndicators, and HumanIndicators settings
@@ -60,12 +72,12 @@ const HUD_SETTINGS = {
     bottom: 20,
     gap: 8,
     padding: 8,
-    background: "rgba(0, 0, 0, 0.8)",
-    borderColor: "rgba(255, 255, 255, 0.5)",
+    background: RPG_HUD_PANEL_BG,
+    borderColor: RPG_BORDER_GOLD,
     borderWidth: 2,
     font: "14px Arial",
-    versionColor: "rgba(255, 255, 0, 0.8)",
-    fpsColor: "white",
+    versionColor: RPG_TITLE_CREAM,
+    fpsColor: RPG_BODY_TEXT,
     pingColors: {
       excellent: "rgb(0, 255, 0)", // Green: < 50ms
       good: "rgb(255, 255, 0)", // Yellow: 50-100ms
@@ -83,10 +95,10 @@ const HUD_SETTINGS = {
     baseBottom: 40,
     baseWidth: 40, // Reduced from 60
     baseHeight: 40, // Reduced from 60
-    background: "rgba(0, 0, 0, 0.7)",
-    borderColor: "rgba(255, 255, 255, 0.5)",
+    background: RPG_HUD_PANEL_BG,
+    borderColor: RPG_BORDER_GOLD,
     borderWidth: 2,
-    hoverBackground: "rgba(0, 0, 0, 0.9)",
+    hoverBackground: "rgba(6, 8, 16, 0.98)",
     baseFont: 24, // Reduced from 36
   },
 };
@@ -134,6 +146,8 @@ export class Hud {
   private canvasHeight: number = 0;
   private questJournalPanel: QuestJournalPanel;
   private dialoguePanel: DialoguePanel;
+  private activeQuestTrackerPanel: ActiveQuestTrackerPanel;
+  private onDialogueQuestChoice: ((action: "accept" | "decline") => void) | null = null;
 
   constructor(
     mapManager: MapManager,
@@ -144,7 +158,7 @@ export class Hud {
     sendSwapItems: (fromSlotIndex: number, toSlotIndex: number) => void,
     sendSwapBagAndEquipment: (bagIndex: number, equipSlot: EquipmentSlotKey) => void,
     sendProgressionAllocations: (
-      kind: "skill" | "character",
+      kind: "ability" | "character",
       allocations: Record<string, number>,
     ) => void,
     getMyPlayer: () => PlayerClient | null,
@@ -159,6 +173,7 @@ export class Hud {
     this.chatWidget = new ChatWidget();
     this.questJournalPanel = new QuestJournalPanel();
     this.dialoguePanel = new DialoguePanel(this.assetManager);
+    this.activeQuestTrackerPanel = new ActiveQuestTrackerPanel();
 
     // Create getInventory function for HUD that uses currentGameState
     const getInventory = (): (InventoryItem | null)[] => {
@@ -213,10 +228,8 @@ export class Hud {
       getMyPlayer,
       sendSelectWeaponLoadout,
       (slot) => sendSetWeaponLoadoutSlot(slot, 0),
-      () => this.toggleInventoryScreen(),
-      () => this.isInventoryScreenOpen(),
-      () => this.inventoryScreen.getActiveTab(),
-      (tab) => this.inventoryScreen.focusTab(tab)
+      () => this.inputManager.getCurrentInventorySlot(),
+      (bagIndex) => this.inputManager.setInventorySlot(bagIndex),
     );
 
     this.minimap = new Minimap(mapManager);
@@ -405,6 +418,12 @@ export class Hud {
     return this.dialoguePanel.completeCurrentLine(gameState);
   }
 
+  public setDialogueQuestChoiceHandler(
+    handler: ((action: "accept" | "decline") => void) | null,
+  ): void {
+    this.onDialogueQuestChoice = handler;
+  }
+
   public render(ctx: CanvasRenderingContext2D, gameState: GameState): void {
     this.currentGameState = gameState;
     const { width, height } = ctx.canvas;
@@ -413,13 +432,23 @@ export class Hud {
     this.crateIndicatorsPanel.render(ctx, gameState);
     this.survivorIndicatorsPanel.render(ctx, gameState);
 
+    const dialogueOcclusion = this.dialoguePanel.getOcclusionProgress();
     const minimapHudLayout = getMinimapHudLayout(width, height, {
       waveStackBottom: 0,
     });
 
     this.minimap.render(ctx, gameState, minimapHudLayout.minimap);
+    const myPlayer = this.getMyPlayer();
+    if (!this.questJournalPanel.isVisible()) {
+      this.activeQuestTrackerPanel.render(
+        ctx,
+        this.mapManager.getAuthoredQuests(),
+        myPlayer?.getQuestProgressPayload() ?? null,
+        minimapHudLayout.minimap,
+      );
+    }
 
-    // FPS, ping, version — bottom-right (row flows left from corner: version | ping | FPS)
+    // Coordinates above FPS/ping/version in the bottom-right.
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     const br = HUD_SETTINGS.BottomRightPanels;
@@ -463,7 +492,6 @@ export class Hud {
 
     ctx.restore();
 
-    const dialogueOcclusion = this.dialoguePanel.getOcclusionProgress();
     if (dialogueOcclusion < 0.98) {
       ctx.save();
       ctx.globalAlpha = Math.max(0, 1 - dialogueOcclusion * 1.2);
@@ -502,21 +530,32 @@ export class Hud {
 
     this.deathScreenPanel.render(ctx, gameState);
 
-    if (!isZombiePlayer) {
-      this.inventoryScreen.render(ctx, gameState);
-    }
-
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    const my = this.getMyPlayer();
     this.questJournalPanel.render(
       ctx,
       this.mapManager.getAuthoredQuests(),
-      my?.getQuestProgressPayload() ?? null,
+      myPlayer?.getQuestProgressPayload() ?? null,
     );
     ctx.restore();
 
     this.dialoguePanel.render(ctx, gameState);
+
+    // Inventory tab shortcuts (minimap column): over NPC dialogue / chat scrim; panel draws after so it sits on top
+    const playerForMenu = getPlayer(gameState);
+    if (!(playerForMenu?.isZombiePlayer?.() ?? false)) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      renderMinimapInventoryMenu(ctx, minimapHudLayout.inventoryMenu, {
+        panelOpen: this.inventoryScreen.isOpen(),
+        activeTab: this.inventoryScreen.getActiveTab(),
+      });
+      ctx.restore();
+    }
+
+    if (!isZombiePlayer) {
+      this.inventoryScreen.render(ctx, gameState);
+    }
 
     // Render fullscreen map on top of everything else if open
     this.fullscreenMap.render(ctx, gameState);
@@ -613,9 +652,6 @@ export class Hud {
 
   /** When inventory is open, camera should center on the visible gameplay column (left of the panel). */
   public getInventoryCameraCenterScreenX(canvasWidth: number): number | null {
-    if (!this.inventoryScreen.isOpen()) {
-      return null;
-    }
     return this.inventoryScreen.getCameraCenterScreenX(canvasWidth);
   }
 
@@ -630,13 +666,26 @@ export class Hud {
     canvasHeight: number,
     clickCount: number = 1
   ): boolean {
-    if (this.loadoutStrip.handleLoadoutStripPriorityClick(x, y, canvasWidth, canvasHeight)) {
-      return true;
+    if (this.currentGameState) {
+      const action = this.dialoguePanel.handleClick(x, y, this.currentGameState);
+      if (action) {
+        this.onDialogueQuestChoice?.(action);
+        return true;
+      }
     }
-
     if (this.inventoryScreen.isOpen()) {
       this.inventoryScreen.handleClick(x, y, canvasWidth, canvasHeight, clickCount);
       return true;
+    }
+
+    const my = this.getMyPlayer();
+    if (!my?.isZombiePlayer?.()) {
+      const layout = getMinimapHudLayout(canvasWidth, canvasHeight, { waveStackBottom: 0 });
+      const tab = hitTestMinimapInventoryMenu(layout.inventoryMenu, x, y);
+      if (tab) {
+        this.inventoryScreen.focusTab(tab);
+        return true;
+      }
     }
 
     if (this.fullscreenMap.handleClick(x, y)) {
@@ -684,6 +733,7 @@ export class Hud {
     this.mouseX = x;
     this.mouseY = y;
     this.canvasHeight = canvasHeight;
+    this.dialoguePanel.updateMousePosition(x, y);
 
     if (this.inventoryScreen.isOpen()) {
       this.inventoryScreen.updateMousePosition(x, y, canvasWidth, canvasHeight);

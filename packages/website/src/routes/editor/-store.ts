@@ -33,6 +33,7 @@ import {
   SPAWNER_META_RESPAWN_INTERVAL_SEC_MIN,
 } from "@survive-the-night/game-shared/map/world-map-types";
 import type { WorldMapQuestDefinition } from "@survive-the-night/game-shared/map/quest-types";
+import { createQuestDefinitionDraft } from "@survive-the-night/game-shared/map/quest-types";
 import {
   DIALOGUE_NPC_MAX_MESSAGE_LENGTH,
   ITEM_SPAWN_TILE_ID_MIN,
@@ -112,6 +113,21 @@ function clampEditorTilePixelSize(n: number): number {
   return clamp(rounded, EDITOR_TILE_PIXEL_MIN, EDITOR_TILE_PIXEL_MAX);
 }
 
+function createUniqueQuestId(existingQuests: WorldMapQuestDefinition[]): string {
+  const seen = new Set(existingQuests.map((quest) => quest.id));
+  const base = `quest_${Date.now()}`;
+  if (!seen.has(base)) {
+    return base;
+  }
+  let suffix = 2;
+  let candidate = `${base}_${suffix}`;
+  while (seen.has(candidate)) {
+    suffix += 1;
+    candidate = `${base}_${suffix}`;
+  }
+  return candidate;
+}
+
 /** Top-left (row,col), size×size, clipped to [0, mapSize). One grid deep-copy. */
 function fillRectInGrid(
   grid: number[][],
@@ -184,6 +200,7 @@ function makeDialogueNpcEntry(
             ...s,
             lines: [...s.lines],
           })),
+          ...(prev!.editorGroups ? { editorGroups: { ...prev.editorGroups } } : {}),
         }
       : { lines }),
     ...(prev?.name ? { name: prev.name } : {}),
@@ -339,6 +356,8 @@ interface EditorState {
   spawnerMeta: WorldMapSpawnerMetaEntry[];
   /** Authored quests saved in world-map.json. */
   quests: WorldMapQuestDefinition[];
+  /** Quest to auto-open/highlight in the quests sidebar. */
+  focusedQuestId: string | null;
   activeLayer: Layer;
   selectedTileId: number;
   /** Spawn layer: selected tile for inspector (row/col in full map). */
@@ -421,14 +440,16 @@ interface EditorState {
   setMessageDecals: (entries: WorldMapMessageDecalEntry[]) => void;
   setSpawnerMeta: (entries: WorldMapSpawnerMetaEntry[]) => void;
   setQuests: (quests: WorldMapQuestDefinition[]) => void;
+  createQuestDraft: (title?: string) => string;
+  setFocusedQuestId: (questId: string | null) => void;
   updateDialogueNpcMessage: (row: number, col: number, message: string) => void;
-  updateDialogueNpcEntry: (
+   updateDialogueNpcEntry: (
     row: number,
     col: number,
     patch: Partial<
       Pick<
         WorldMapDialogueNpcEntry,
-        "name" | "lines" | "grantQuestId" | "dialogueSessions"
+        "name" | "lines" | "grantQuestId" | "dialogueSessions" | "editorGroups"
       >
     >,
   ) => void;
@@ -558,6 +579,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   messageDecals: [],
   spawnerMeta: [],
   quests: [],
+  focusedQuestId: null,
   activeLayer: "ground",
   selectedTileId: 0,
   selectedSpawnCell: null,
@@ -619,7 +641,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setDialogueNpcs: (entries) => set({ dialogueNpcs: entries }),
   setMessageDecals: (entries) => set({ messageDecals: entries }),
   setSpawnerMeta: (entries) => set({ spawnerMeta: entries }),
-  setQuests: (quests) => set({ quests }),
+  setQuests: (quests) =>
+    set((state) => ({
+      quests,
+      focusedQuestId:
+        state.focusedQuestId && quests.some((quest) => quest.id === state.focusedQuestId)
+          ? state.focusedQuestId
+          : null,
+    })),
+  createQuestDraft: (title) => {
+    const quests = get().quests;
+    const id = createUniqueQuestId(quests);
+    const next = [...quests, createQuestDefinitionDraft(id, title)];
+    set({ quests: next, focusedQuestId: id });
+    return id;
+  },
+  setFocusedQuestId: (questId) => set({ focusedQuestId: questId }),
   updateDialogueNpcMessage: (row, col, message) => {
     const clamped = message.slice(0, DIALOGUE_NPC_MAX_MESSAGE_LENGTH);
     set((state) => {
