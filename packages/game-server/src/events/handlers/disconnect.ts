@@ -33,6 +33,7 @@ export function onDisconnect(context: HandlerContext, socket: ISocketAdapter): v
   context.players.delete(socket.id);
   context.playerDisplayNames.delete(socket.id);
   context.playerColors.delete(socket.id);
+  context.playerClasses.delete(socket.id);
 
   if (player) {
     const playerId = player.getId();
@@ -78,4 +79,3 @@ export const disconnectHandler: SocketEventHandler<void> = {
   event: "disconnect",
   handler: onDisconnect,
 };
-
