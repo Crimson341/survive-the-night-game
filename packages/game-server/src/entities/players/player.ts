@@ -78,6 +78,7 @@ import {
 } from "@shared/quests/player-quest-state";
 import { initPlayerQuestState, tickWaypointSteps } from "@/quests/quest-runtime";
 import { getRecipeById, getScrapOutputsForItem } from "@shared/util/recipes";
+import { PlayerClassId } from "@shared/player/player-class";
 
 /**
  * Cached list of entity types that players can pass through (collision passthrough).
@@ -143,6 +144,7 @@ export class Player extends Entity {
         experience: 0,
         ping: 0,
         displayName: "",
+        playerClassId: "survivor",
         stamina: getConfig().player.MAX_STAMINA,
         maxStamina: getConfig().player.MAX_STAMINA,
         deathTime: 0, // Timestamp when player died, 0 means not dead
@@ -1291,6 +1293,14 @@ export class Player extends Entity {
 
   getPlayerColor(): PlayerColor {
     return this.serialized.get("playerColor");
+  }
+
+  setPlayerClassId(playerClassId: PlayerClassId): void {
+    this.serialized.set("playerClassId", playerClassId);
+  }
+
+  getPlayerClassId(): PlayerClassId {
+    return this.serialized.get("playerClassId");
   }
 
   incrementKills() {

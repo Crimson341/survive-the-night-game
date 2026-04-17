@@ -48,6 +48,34 @@ import {
   type ProfessionId,
   type ProfessionProgress,
 } from "@shared/util/professions";
+import { coercePlayerClassId, type PlayerClassId } from "@shared/player/player-class";
+
+const PLAYER_CLASS_ASSET_PREFIX: Record<PlayerClassId, string> = {
+  survivor: "player_survivor",
+  scavenger: "player_scavenger",
+  medic: "player_medic",
+};
+
+export function resolvePlayerAssetKey(params: {
+  isZombie: boolean;
+  playerClassId: PlayerClassId;
+  playerColor: PlayerColor;
+  skin: SkinType;
+}): string {
+  const { isZombie, playerClassId, playerColor, skin } = params;
+  if (isZombie || skin === SKIN_TYPES.ZOMBIE) {
+    return "grave_tyrant";
+  }
+
+  const baseSkin =
+    skin === SKIN_TYPES.WDC ? "player_wdc" : PLAYER_CLASS_ASSET_PREFIX[playerClassId];
+
+  if (playerColor && playerColor !== PLAYER_COLORS.NONE) {
+    return `${baseSkin}_${playerColor}`;
+  }
+
+  return baseSkin;
+}
 
 export class PlayerClient extends ClientEntity implements IClientEntity, Renderable {
   private readonly ARROW_LENGTH = 20;
@@ -60,6 +88,7 @@ export class PlayerClient extends ClientEntity implements IClientEntity, Rendera
   private damageFlashUntil: number = 0;
   private skin: SkinType = SKIN_TYPES.DEFAULT;
   private playerColor: PlayerColor = PLAYER_COLORS.NONE;
+  private playerClassId: PlayerClassId = "survivor";
   private kills: number = 0;
   private experience: number = 0;
   private ping: number = 0;
@@ -123,6 +152,7 @@ export class PlayerClient extends ClientEntity implements IClientEntity, Rendera
     };
     this.skin = data.skin || SKIN_TYPES.DEFAULT;
     this.playerColor = data.playerColor || PLAYER_COLORS.NONE;
+    this.playerClassId = coercePlayerClassId((data as any).playerClassId);
     this.kills = data.kills || 0;
     this.experience = (data as any).experience ?? 0;
     this.ping = data.ping || 0;
@@ -179,6 +209,7 @@ export class PlayerClient extends ClientEntity implements IClientEntity, Rendera
     if ((this as any).skin !== undefined) {
       this.skin = (this as any).skin;
     }
+    this.playerClassId = coercePlayerClassId((this as any).playerClassId);
   }
 
   public getQuestProgressPayload(): PlayerQuestStatePayload {
@@ -194,20 +225,12 @@ export class PlayerClient extends ClientEntity implements IClientEntity, Rendera
   }
 
   private getPlayerAssetKey(): string {
-    // Zombie players use zombie skin (regular zombie walk animation)
-    // Read isZombie from deserialized data as fallback (in case it hasn't been synced yet)
-    const isZombie = this.isZombie || (this as any).isZombie || false;
-    const skin = this.skin || (this as any).skin;
-    if (isZombie || skin === SKIN_TYPES.ZOMBIE) {
-      return "grave_tyrant"; // Use regular zombie sprite for zombie players
-    }
-
-    const baseSkin = this.skin === SKIN_TYPES.WDC ? "player_wdc" : "player";
-    // If player has a color, append it to the asset key
-    if (this.playerColor && this.playerColor !== PLAYER_COLORS.NONE) {
-      return `${baseSkin}_${this.playerColor}`;
-    }
-    return baseSkin;
+    return resolvePlayerAssetKey({
+      isZombie: this.isZombie || (this as any).isZombie || false,
+      playerClassId: coercePlayerClassId(this.playerClassId || (this as any).playerClassId),
+      playerColor: this.playerColor,
+      skin: this.skin || (this as any).skin || SKIN_TYPES.DEFAULT,
+    });
   }
 
   public getPlayerColor(): PlayerColor {
